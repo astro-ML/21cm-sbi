@@ -15,4 +15,3 @@ sbi-logs
 _cache
 !runner.ipynb
 *.npz
-21cm-wrapper
