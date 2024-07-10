@@ -1,0 +1,10 @@
+21cmfast
+matplotlib
+numpy
+pyyaml
+powerbox
+schwimmbad
+emcee 
+pymultinest
+mpi4py
+21CMMC

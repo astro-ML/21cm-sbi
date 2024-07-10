@@ -1,0 +1,55 @@
+### 
+input_params:
+  lightcone_quantities:
+    - brightness_temp
+    #- xH_box
+    #- density
+  redshift: 5.5
+  max_redshift: 12
+  random_seed: 42
+  
+astro_params:
+  ### primary variables to change ###
+  ## https://21cmfast.readthedocs.io/en/latest/reference/_autosummary/inputs/py21cmfast.inputs.AstroParams.html ##
+  # use default parameters for this section
+  use_default: true
+
+# based on plank18 https://arxiv.org/pdf/1807.06209.pdf
+cosmo_params: 
+  ### cosmological parameters ###
+  ## https://21cmfast.readthedocs.io/en/latest/reference/_autosummary/inputs/py21cmfast.inputs.CosmoParams.html ##
+  # use default parameters for this section
+  use_default: true
+
+user_params:
+  ### hyperparameters for the coeval simulation call ###
+  ## https://21cmfast.readthedocs.io/en/latest/reference/_autosummary/inputs/py21cmfast.inputs.UserParams.html ##
+  # use default parameters for this section
+  use_default: false
+  # Length of the box, in Mpc. Default 300 Mpc.
+  BOX_LEN: 160
+  # Number of cells for the low-res box. Default 200.
+  HII_DIM: 40
+  #DIM: 280
+  # Whether to perform the Zel’Dovich or 2LPT perturbation on the low or high resolution grid.
+  PERTURB_ON_HIGH_RES: true
+  # If True, calculates and evaluates quantites using interpolation tables, which is considerably faster than when performing integrals explicitly.
+  USE_INTERPOLATION_TABLES: false
+  NO_RNG: false
+  N_THREADS: 1
+
+flag_options:
+  ### additional features which can be activated / deactivated if required ###
+  ## https://21cmfast.readthedocs.io/en/latest/reference/_autosummary/inputs/py21cmfast.inputs.FlagOptions.html ##
+  # use default parameters for this section
+  use_default: false
+  # Whether to perform inhomogeneous recombinations. Increases the computation time.
+  INHOMO_RECO: true
+  # Whether to perform IGM spin temperature fluctuations (i.e. X-ray heating). Dramatically increases the computation time.
+  USE_TS_FLUCT: true
+
+global_params:
+  ### global arguments for the simulation ###
+  ## https://21cmfast.readthedocs.io/en/latest/reference/_autosummary/inputs/py21cmfast.inputs.GlobalParams.html ##
+  # use default parameters for this section
+  use_default: true

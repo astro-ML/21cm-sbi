@@ -1,0 +1,17 @@
+*.ipynb
+__pycache__
+run*
+*.npz
+*.png
+*.jpg
+convert.py
+train_cnn.py
+*.o*
+*.e*
+*.log
+*.pt
+sbi-logs
+*data*
+_cache
+!runner.ipynb
+*.npz
