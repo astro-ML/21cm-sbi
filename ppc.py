@@ -73,6 +73,9 @@ def simulator(theta: torch.FloatTensor, Model: object, data_loader: object, thre
 
 
 if __name__ == '__main__':
+    # hyperparams
+    data_path = "./data/"
+    train_test_data_ration = 0.95
 
     norm_range = torch.tensor([
                 [0.3,10.0], # M_WDM
@@ -94,7 +97,7 @@ if __name__ == '__main__':
                                 apply_norm=True, norm_range=norm_range, augmentation_probability=0)
 
     # import data to torch dataloader
-    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True,
+    train_dataloader = DataLoader(train_data, batch_size=8, shuffle=True,
                                     num_workers = 2, pin_memory = True, prefetch_factor=2)
 
 
@@ -149,7 +152,7 @@ if __name__ == '__main__':
 
     # We draw theta samples from the posterior. This part is not in the scope of SBI
 
-    posterior_samples = train_data.denormalize(labels=posterior.sample((21,)))
+    posterior_samples = train_data.denormalize(labels=posterior.sample((5000,)))
 
     # We use posterior theta samples to generate x data
 
