@@ -112,16 +112,16 @@ def simulation(theta):
 def simulator(theta: torch.FloatTensor, Model: object, data_loader: object, threads: int = 1):
     tshape = theta.shape
     schwimmhalle = Pool(max_workers=threads, max_tasks_per_child=1, mp_context=get_context('spawn'))
-    runner = [params.tolist() for params in theta]
-    result = torch.empty((0,6), dtype=torch.float32)
-    with alive_bar(len(runner), force_tty=True) as bar: 
+    #runner = [params.tolist() for params in theta]
+    result = torch.empty((0,tshape[1]), dtype=torch.float32)
+    with alive_bar(tshape[0], force_tty=True) as bar: 
         with schwimmhalle as p:
-            data = p.map(simulation, runner)
-            for dat in as_completed(data):
-                bt, lab = dat.result()
+            futures = {executor.submit(simulation, params.tolist()): params.tolist() for params in theta}
+            for future in as_completed(futures):
+                lc_bt, lab = future.result()
                 bt, lab = data_loader.normalize(images=torch.unsqueeze(bt, dim=0), labels=torch.unsqueeze(lab, dim=0))
                 pred = model.fast_forward(bt)
-                result = torch.cat((result, pred),0)
+                result = torch.cat((result, pred),0)    
                 bar()
     return result
 
