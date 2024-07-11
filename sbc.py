@@ -58,7 +58,7 @@ from sbi import utils, analysis
 user_params = {
 "HII_DIM": 40,
 "BOX_LEN": 160,
-"N_THREADS": 2,
+"N_THREADS": 1,
 "USE_INTERPOLATION_TABLES": True,
 "PERTURB_ON_HIGH_RES": True
 }
@@ -106,10 +106,10 @@ def simulation(theta):
         save = False, sanity_check = True, filter_peculiar = False,
         astro_params = astro_params, global_params = global_params, cosmo_params = cosmo_params).brightness_temp, dtype=torch.float32)
     
-    return res
+    return (res, torch.as_tensor(theta, dtype=torch.float32))
 
 
-def simulator(theta: torch.FloatTensor, Model: object, threads: int = 1):
+def simulator(theta: torch.FloatTensor, Model: object, data_loader: object, threads: int = 1):
     tshape = theta.shape
     schwimmhalle = Pool(max_workers=threads, max_tasks_per_child=1, mp_context=get_context('spawn'))
     runner = [params.tolist() for params in theta]
@@ -118,8 +118,10 @@ def simulator(theta: torch.FloatTensor, Model: object, threads: int = 1):
         with schwimmhalle as p:
             data = p.map(simulation, runner)
             for dat in as_completed(data):
-                pred = model.fast_forward(dat.result())
-                result = torch.cat((result, pred))
+                bt, lab = dat.result()
+                bt, lab = data_loader.normalize(images=torch.unsqueeze(bt, dim=0), labels=torch.unsqueeze(lab, dim=0))
+                pred = model.fast_forward(bt)
+                result = torch.cat((result, pred),0)
                 bar()
     return result
 
@@ -156,17 +158,20 @@ if __name__ == '__main__':
 
     # We draw theta samples from the posterior. This part is not in the scope of SBI
 
-    posterior_samples = train_data.denormalize(labels=posterior.sample((50,)))
+    posterior_samples = train_data.denormalize(labels=posterior.sample((5000,)))
 
     # We use posterior theta samples to generate x data
 
-    x_pp = torch.as_tensor(simulator(theta = posterior_samples, Model = model, threads=6))
+    x_pp = torch.as_tensor(simulator(theta = posterior_samples, Model = model, threads=6, data_loader=train_data))
 
     # We verify if the observed data falls within the support of the generated data
-    _ = analysis.pairplot(
+    fig, _ = analysis.pairplot(
         samples=x_pp,
-        points=x_o
+        points=x_o,
+        limits=[[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],], figsize=(5, 5),
+        labels = ["M_WDM", "OMm", "L_X", "NU_X_THRESH", "ION_Tvir_MIN", "HII_EFF_FACTOR"],
     )
     
+
 
 
