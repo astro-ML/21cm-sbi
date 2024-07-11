@@ -4,14 +4,7 @@ import os, fnmatch, sys
 import numpy as np
 from torch.utils.data import DataLoader
 from typing import Callable
-device = (
-    "cuda"
-    if torch.cuda.is_available()
-    else "mps"
-    if torch.backends.mps.is_available()
-    else "cpu"
-)
-print(f"Using {device} device")
+print("CUDA is available: ", torch.cuda.is_available())
 from matplotlib.pyplot import imshow
 from alive_progress import alive_bar
 from ps2d_for_sbi import *
@@ -153,7 +146,7 @@ class DataHandler():
     def __init__(self, path: str = "./", prefix: str = "batch_", load_to_ram: bool = True, 
                  split: float = 1, training_data: bool = True, noise_model: object = None,
                  norm_range: torch.FloatTensor = None, apply_norm: bool = False, augmentation_probability: float = 0.5) -> None:
-        super().__init__()
+        #super().__init__()
         self.path = path
         self.prefix = prefix
         self.files = fnmatch.filter(os.listdir(path), prefix + "*" + ".pt")
@@ -223,7 +216,6 @@ class DataHandler():
         plt.title = str(self.labels[idx])
         plt.show()
 
-
     def normalize(self, labels: torch.FloatTensor, images: torch.FloatTensor = None, 
                   epsilon: float = 1e-2) -> tuple[torch.FloatTensor, ...]:
         if images is not None:
@@ -240,6 +232,7 @@ class DataHandler():
         labels = labels * (self.norm_range[:,1] - self.norm_range[:,0] + 2*epsilon) + self.norm_range[:,0] - epsilon
         return labels
     
+
 
 
 class gaussian_noise:

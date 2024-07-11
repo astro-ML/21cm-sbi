@@ -53,7 +53,6 @@ def simulation(theta):
 def simulator(theta: torch.FloatTensor, Model: object, data_loader: object, threads: int = 1):
     tshape = theta.shape
     schwimmhalle = Pool(max_workers=threads, max_tasks_per_child=1, mp_context=get_context('spawn'))
-    paramater = torch.empty((0, tshape[1]), dtype=torch.float32)
     first = True
     with alive_bar(tshape[0], force_tty=True, refresh_secs=5) as bar: 
         with schwimmhalle as p:
@@ -65,28 +64,15 @@ def simulator(theta: torch.FloatTensor, Model: object, data_loader: object, thre
                 pred = Model.fast_forward(bt)
                 if first:
                     x = torch.empty(pred.shape, dtype=torch.float32)
+                    first=False
                 # may be unsorted
                 x = torch.cat((x, pred),0)    
-                parameter = torch.cat((paramater, lab),0)
                 bar()
-    return x, parameter
+    return x
 
 
 
 if __name__ == '__main__':
-    # hyperparams
-    data_path = "./data/"
-    batch_size = 8
-    epochs = 120
-    train_test_data_ration = 0.95
-
-    optimizer = torch.optim.Adam
-    optimizer_params = {
-        "lr": 6e-4,
-    }
-
-    loss = torch.nn.MSELoss
-    loss_params = {}
 
     norm_range = torch.tensor([
                 [0.3,10.0], # M_WDM
@@ -100,24 +86,21 @@ if __name__ == '__main__':
 
     # transform trainingsdata
     # perhaps add check if file is there: continue + override option in the future
-    #convert_to_torch(path = data_path, prefix="run", redshift_cutoff=600, debug=False, statistics=True)
+    convert_to_torch(path = data_path, prefix="run", redshift_cutoff=600, debug=False, statistics=False)
 
     # load data
     train_data = DataHandler(path=data_path, prefix="batch", load_to_ram=False,
                                 split = train_test_data_ration, training_data = True,
                                 apply_norm=True, norm_range=norm_range, augmentation_probability=0)
-    test_data = DataHandler(path=data_path, prefix="batch", load_to_ram=False,
-                                split = train_test_data_ration, training_data = False,
-                                apply_norm=True, norm_range=norm_range, augmentation_probability=0)
+
     # import data to torch dataloader
     train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True,
                                     num_workers = 2, pin_memory = True, prefetch_factor=2)
-    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False,
-                                    num_workers = 2, pin_memory = True, prefetch_factor=2)
+
 
     # init model
     model = ModelHandler(Model = Summary_net_lc_smol,
-                            Training_data=train_dataloader, Test_data=test_dataloader, device='cpu')
+                            Training_data=train_dataloader, device='cpu')
 
     from sbi.inference import SNPE, SNLE
     from sbi import utils, analysis
@@ -166,11 +149,11 @@ if __name__ == '__main__':
 
     # We draw theta samples from the posterior. This part is not in the scope of SBI
 
-    posterior_samples = train_data.denormalize(labels=posterior.sample((50,)))
+    posterior_samples = train_data.denormalize(labels=posterior.sample((21,)))
 
     # We use posterior theta samples to generate x data
 
-    x_pp, x_o = torch.as_tensor(simulator(theta = posterior_samples, Model = model, threads=6, data_loader=train_data))
+    x_pp = simulator(theta = posterior_samples, Model = model, threads=6, data_loader=train_data)
 
     # We verify if the observed data falls within the support of the generated data
     fig, _ = analysis.pairplot(
