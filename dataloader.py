@@ -245,9 +245,11 @@ class gaussian_noise:
 
 class Transpose(torch.nn.Module):
     def __init__(self,p: float):
+        super().__init__()
         self.p = p
+
     def forward(self, img):
-        if torch.rand(1).item() < p:
-            return torch.transpose(img, 0,1)
+        if torch.rand(1).item() < self.p:
+            return torch.transpose(img, -3,-2)
         else:
             return img
