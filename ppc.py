@@ -67,6 +67,7 @@ def simulator(theta: torch.FloatTensor, Model: object, data_loader: object, thre
                     first=False
                 # may be unsorted
                 x = torch.cat((x, pred),0)    
+                print(x)
                 bar()
     return x
 
@@ -89,7 +90,7 @@ if __name__ == '__main__':
 
     # transform trainingsdata
     # perhaps add check if file is there: continue + override option in the future
-    convert_to_torch(path = data_path, prefix="run", redshift_cutoff=600, debug=False, statistics=False)
+    # convert_to_torch(path = data_path, prefix="run", redshift_cutoff=600, debug=False, statistics=False)
 
     # load data
     train_data = DataHandler(path=data_path, prefix="batch", load_to_ram=False,
