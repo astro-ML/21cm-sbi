@@ -15,7 +15,7 @@ def simulation(theta):
     user_params = {
     "HII_DIM": 40,
     "BOX_LEN": 160,
-    "N_THREADS": 1,
+    "N_THREADS": 6,
     "USE_INTERPOLATION_TABLES": True,
     "PERTURB_ON_HIGH_RES": True
     }
@@ -157,7 +157,7 @@ if __name__ == '__main__':
 
     # We use posterior theta samples to generate x data
 
-    x_pp = simulator(theta = posterior_samples, Model = model, threads=6, data_loader=train_data)
+    x_pp = simulator(theta = posterior_samples, Model = model, threads=1, data_loader=train_data)
 
     # We verify if the observed data falls within the support of the generated data
     fig, _ = analysis.pairplot(
