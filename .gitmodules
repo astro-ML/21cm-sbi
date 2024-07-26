@@ -1,3 +1,4 @@
 [submodule "21cm-wrapper"]
 	path = 21cm-wrapper
 	url = https://github.com/astro-ML/21cm-wrapper.git
+

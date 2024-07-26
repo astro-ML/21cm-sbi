@@ -15,6 +15,10 @@ from torchvision.transforms import v2
 # write additional class for model itself
 
 
+'''
+class SBIHandler(ModelHandler):
+    def __init__(self, )
+'''
 
 
 
@@ -29,16 +33,15 @@ class ModelHandler():
               lossf: Callable, optimizer: object):
         self.lossf = lossf
         self.optimizer = optimizer
-        lentrain = len(self.TrainingD)
 
         losstrain = []
         losstest = []
         with alive_bar(epochs, force_tty=True, refresh_secs=5) as bbar:
             for epoch in range(epochs):
                 self.Model.train()
-                for img, lab, tau in self.TrainingD:
+                for lab, img in self.TrainingD:
 
-                    img, lab, tau = img.to(self.device), lab.to(self.device), tau.to(self.device)
+                    img, lab = img.to(self.device), lab.to(self.device)
 
 
                     pred = self.Model(img)
@@ -68,8 +71,8 @@ class ModelHandler():
         Model.eval()
         test_loss = []
         with torch.no_grad():
-            for img, lab, tau in Validation_data:
-                img, lab, tau = img.to(device), lab.to(device), tau.to(device)
+            for lab, img, tau in Validation_data:
+                img, lab, tau = img.to(device), lab.to(device)
                 pred = Model(img)
                 test_loss.append(lossf(denormalize(pred), denormalize(lab)).to('cpu').item())
         if plot:
@@ -92,9 +95,9 @@ class ModelHandler():
         test_idx = np.random.randint(0, len(Validation_data), num_samples)
         test_loss = []
         with torch.no_grad():
-            for img, lab, tau in Validation_data:
+            for lab, img in Validation_data:
                 if num_samples > 0:
-                    img, lab, tau = img.to(device), lab.to('cpu'), tau.to(device)
+                    img, lab = img.to(device), lab.to('cpu')
                     pred = Model(img).to('cpu')
                     print(f'loss: ' + str(lossf(denormalize(pred), denormalize(lab)).item()) + '\n',
                         f'pred: ' + str(denormalize(pred.to('cpu'))) + '\n',
@@ -116,7 +119,8 @@ class ModelHandler():
     def full_inference(self, dataloader: object) -> torch.FloatTensor:
         with alive_bar(len(dataloader), force_tty=True) as bar:
             with torch.no_grad():
-                for i, (img, lab, tau) in enumerate(dataloader):
+                for i, (lab, img) in enumerate(dataloader):
+                    img, lab = img.to(self.device), lab.to(self.device)
                     
                     if not i:
                         summary_vec = torch.empty(0,lab.shape[1])
@@ -143,9 +147,10 @@ class ModelHandler():
 
 
 class DataHandler():
-    def __init__(self, path: str = "./", prefix: str = "batch_", load_to_ram: bool = True, 
+    def __init__(self, path: str = "./", prefix: str = "batch_",
                  split: float = 1, training_data: bool = True, noise_model: object = None,
-                 norm_range: torch.FloatTensor = None, apply_norm: bool = False, augmentation_probability: float = 0.5) -> None:
+                 norm_range: torch.FloatTensor = None, apply_norm: bool = False, 
+                 augmentation_probability: float = 0.5, return_idx: bool = False) -> None:
         #super().__init__()
         self.path = path
         self.prefix = prefix
@@ -153,9 +158,9 @@ class DataHandler():
         if training_data: self.files = self.files[:int(len(self.files)*split)]
         else: self.files = self.files[int(len(self.files)*split):]
         self.fshape = torch.load(path + self.files[0])['images'].shape
-        self.lram = load_to_ram
         self.norm_range = norm_range
         self.apply_norm = apply_norm
+        self.return_idx = return_idx
 
         if 1 > augmentation_probability > 0:
             # augmentation probability
@@ -172,31 +177,27 @@ class DataHandler():
             self.noise = True
         else:
             self.noise = False
-        if load_to_ram:
-            self.images = np.empty((0,self.fshape[1:]))
-            self.labels = np.empty((0,6))
-            self.taus = np.empty((0,1))
-            for file in self.files:
-                img, lab, tau = self.load_file(file)
-                self.images = torch.cat((self.images, img))
-                self.labels = torch.cat((self.labels, lab))
-                self.taus = torch.cat((self.taus, tau))
+                
+    def __call__(self) -> tuple:
+        return self.load_file(0)
 
     def __len__(self) -> int:
         return len(self.files)
     
     def __getitem__(self, idx) -> tuple:
-        if self.lram:
-            return (self.images[idx], 
-                    self.labels[idx], 
-                    self.taus[idx])
-        else:
-            return self.load_file(self.files[idx])
-
-    def load_file(self, file: str) -> tuple:
+        return self.load_file(idx)
+    
+    def give_all(self):
+        img, lab = torch.empty((len(self), *self.fshape)),  torch.empty((len(self), 6))
+        for i in range(len(self.files)):
+            img[i], lab[i] = self.__getitem__(i)
+        return lab, img
+        
+    def load_file(self, idx: int) -> tuple:
         '''files should contain [batch_size, ...]'''
+        file = self.files[idx]
         data = torch.load(self.path + file)
-        images, labels, taus = data['images'], data['labels'], data['taus']
+        images, labels = data['images'], data['labels']
         # TO-DO: Find better way to handle batch loading, right now only bathch loading with size of
         # 1 is possible and dimension is just thrown away
         # Idea: Load sub-batch of data for better io-performance
@@ -204,7 +205,7 @@ class DataHandler():
         if self.noise: images = self.noise_model(images)
         if self.apply_norm: images, labels = self.normalize(images=images, labels=labels)
         if self.augment_data: images = self.transforms(images)
-        return (images, labels, taus)
+        return (labels, images, idx) if self.return_idx else (labels, images)
     
     def save_file(self, file: str, data: dict) -> None:
             np.savez(file, **data)
@@ -232,6 +233,90 @@ class DataHandler():
         labels = labels * (self.norm_range[:,1] - self.norm_range[:,0] + 2*epsilon) + self.norm_range[:,0] - epsilon
         return labels
     
+class mock_noise:
+    def __init__(self, path: str = "./"):
+        print()
+
+    def noise_mock(self, brightness_temp: np.ndarray, parameters: np.array) -> np.ndarray:
+        """
+        Add noise to the simulation.
+        
+        Args:
+            brightness_temp (np.ndarray): The brightness temperature data.
+            parameters (np.array): The simulation parameters.
+        
+        Returns:
+            np.ndarray: The brightness temperature data with added noise.
+        """
+        self.debug('Create mock')
+        with open("21cm_pie/generate_data/redshifts5.npy", "rb") as data:
+            box_redshifts = list(np.load(data, allow_pickle=True))
+            box_redshifts.sort()
+        cosmo_params = p21c.CosmoParams(OMm=parameters[1])
+        astro_params = p21c.AstroParams(INHOMO_RECO=True)
+        user_params = p21c.UserParams(HII_DIM=140, BOX_LEN=200)
+        flag_options = p21c.FlagOptions()
+        sim_lightcone = p21c.LightCone(5., user_params, cosmo_params, astro_params, flag_options, 0,
+                                       {"brightness_temp": brightness_temp}, 35.05)
+        redshifts = sim_lightcone.lightcone_redshifts
+        box_len = np.array([])
+        y = 0
+        z = 0
+        for x in range(len(brightness_temp[0][0])):
+            if redshifts[x] > (box_redshifts[y + 1] + box_redshifts[y]) / 2:
+                box_len = np.append(box_len, x - z)
+                y += 1
+                z = x
+        box_len = np.append(box_len, x - z + 1)
+        y = 0
+        delta_T_split = []
+        for x in box_len:
+            delta_T_split.append(brightness_temp[:,:,int(y):int(x+y)])
+            y+=x
+            
+        mock_lc = np.zeros(brightness_temp.shape)
+        cell_size = 200 / 140
+        hii_dim = 140
+        k140 = np.fft.fftfreq(140, d=cell_size / 2. / np.pi)
+        index1 = 0
+        index2 = 0
+        files = self.read_noise_files()
+        for x in range(len(box_len)):
+            with np.load(files[x]) as data:
+                ks = data["ks"]
+                T_errs = data["T_errs"]
+            kbox = np.fft.rfftfreq(int(box_len[x]), d=cell_size / 2. / np.pi)
+            volume = hii_dim * hii_dim * box_len[x] * cell_size ** 3
+            err21a = np.random.normal(loc=0.0, scale=1.0, size=(hii_dim, hii_dim, int(box_len[x])))
+            err21b = np.random.normal(loc=0.0, scale=1.0, size=(hii_dim, hii_dim, int(box_len[x])))
+            deldel_T = np.fft.rfftn(delta_T_split[x], s=(hii_dim, hii_dim, int(box_len[x])))
+            deldel_T_noise = np.zeros((hii_dim, hii_dim, int(box_len[x])), dtype=np.complex_)
+            deldel_T_mock = np.zeros((hii_dim, hii_dim, int(box_len[x])), dtype=np.complex_)
+            
+            for n_x in range(hii_dim):
+                for n_y in range(hii_dim):
+                    for n_z in range(int(box_len[x] / 2 + 1)):
+                        k_mag = np.sqrt(k140[n_x] ** 2 + k140[n_y] ** 2 + kbox[n_z] ** 2)
+                        err21 = np.interp(k_mag, ks, T_errs)
+                        
+                        if k_mag:
+                            deldel_T_noise[n_x, n_y, n_z] = np.sqrt(np.pi * np.pi * volume / k_mag ** 3 * err21) * (err21a[n_x, n_y, n_z] + err21b[n_x, n_y, n_z] * 1j)
+                        else:
+                            deldel_T_noise[n_x, n_y, n_z] = 0
+                        
+                        if err21 >= 1000:
+                            deldel_T_mock[n_x, n_y, n_z] = 0
+                        else:
+                            deldel_T_mock[n_x, n_y, n_z] = deldel_T[n_x, n_y, n_z] + deldel_T_noise[n_x, n_y, n_z] / cell_size ** 3
+            
+            delta_T_mock = np.fft.irfftn(deldel_T_mock, s=(hii_dim, hii_dim, box_len[x]))
+            index1 = index2
+            index2 += delta_T_mock.shape[2]
+            mock_lc[:, :, index1:index2] = delta_T_mock
+            if x % 5 == 0:
+                self.debug(f'mock created to {int(100 * index2 / 2350)}%')
+        return mock_lc
+    
 
 
 
@@ -252,3 +337,5 @@ class Transpose(torch.nn.Module):
             return torch.transpose(img, -3,-2)
         else:
             return img
+        
+        

@@ -189,28 +189,19 @@ def convert_to_torch(path: str, prefix: str = "run_", check_for_nan: bool = True
     print(f"Done, {len(nan_counter)} NaNs encountered in \n{nan_counter}")   
 
 
-def run_2dps(path, file, z, dz=0.5, BOX_LEN=200, k_factor=1.09, use_wedge=False, plot = False):
-    convert_to_npz(path, file, check_for_nan = False)
-    k_perp, k_par, power, _, _ = compute_2D_PS(path + "temp.npz", z, dz, BOX_LEN, k_factor, use_wedge)
-    if plot: plot_2D_PS((k_perp, k_par, power, z, dz), path + "temp.npz")
-    return k_perp, k_par, power
-    
 
-
-def convert_to_2dps(path: str, prefix: str = "", check_for_nan: bool = True, debug: bool = False,
-                batch_size: int = 32) -> None:
+def convert_to_2dps(path: str, prefix: str = "", check_for_nan: bool = True, debug: bool = False) -> None:
     files = fnmatch.filter(os.listdir(path), prefix + "*")
     if debug: print(f"{files}")
     nan_counter = []
     #zix = cut_z_idx(np.asarray(h5.File(path + files[0], 'r')["node_redshifts"]), z_cut)
-    chunks = chunking(files, batch_size)
     # execute ps 1 time to find dims
-    convert_to_npz(path, files[0], check_for_nan=False)
-    xy_dim, z_dim = 50,37
-    with alive_bar(int(len(files)/batch_size), disable=debug) as fbar:
-        for i, file_batch in enumerate(chunks):
-            ps2ds = torch.empty(len(file_batch), 13, xy_dim, z_dim)
-            labels = torch.empty(len(file_batch), 6)
+    with alive_bar(len(files), force_tty=True) as fbar:
+        for i, file in enumerate(files):
+            if i == 0:
+                
+                ps2ds = torch.empty(len(file_batch), 13, xy_dim, z_dim)
+                labels = torch.empty(len(file_batch), 6)
             #taus = torch.empty(len(file_batch), 1)
             #zs = torch.empty(len(file_batch), zix)
             #gxHs = torch.empty(len(file_batch), zix)
@@ -278,56 +269,110 @@ def plot_random(num: int = 5, path: str = "./", prefix: str = "run_") -> None:
         plt.show()
 
 
-def convert_to_npz(path: str, prefix: str = "", check_for_nan: bool = True, debug: bool = False) -> None:
+def convert_to_npz(path: str, prefix: str = "run_", check_for_nan: bool = True, debug: bool = False, remove_zeros: bool = True,
+                     redshift_cutoff: int = 1175, statistics: bool = False) -> None:
     '''Given a path and an optinal prefix 
     (e.g. only convert all files named as run_, set prefix = "run_")
     this function converts .h5 files from 21cmfastwrapper to the common .npz format'''
     # image, label, tau, gxH
     # search for all files given in a path given a prefix an loop over those
+    if statistics:
+        max_bt, min_bt, avg_bt, taus, zlc = ([] for i in range(5))
+    if remove_zeros or statistics:
+        zeros = []
     files = fnmatch.filter(os.listdir(path), prefix + "*")
     if debug: print(f"{files}")
-    len_files = len(files)
     nan_counter = []
-    # initalize the progress bar
-    
-    for i,file in enumerate(files):
-        if debug: print(f"load {path + file}")
-        lcone = p21c.outputs.LightCone.read(path + file)
-        # load image
-        image = lcone.brightness_temp
-        # check if there are NaNs in the brightness map
-        if check_for_nan:
-            if np.isnan(image).any():
-                nan_counter.append(file)
-                continue
-        #load labels, WDM,OMm,LX,E0,Tvir,Zeta
-        labels = [
-            lcone.global_params["M_WDM"],
-            lcone.cosmo_params.OMm,
-            lcone.astro_params.L_X,
-            lcone.astro_params.NU_X_THRESH,
-            lcone.astro_params.ION_Tvir_MIN,
-            lcone.astro_params.HII_EFF_FACTOR
-        ]
-        # load redshift
-        redshifts = lcone.node_redshifts
-        # compute tau
-        gxH=lcone.global_xH
-        gxH=gxH[::-1]
-        redshifts=redshifts[::-1]
-        tau=p21c.compute_tau(redshifts=redshifts,global_xHI=gxH)
+    # zix = 88 #cut_z_idx(np.asarray(h5.File(path + files[0], 'r')["node_redshifts"]), z_cut)
+    with alive_bar(len(files), force_tty=True) as fbar:
+        for i, file in enumerate(files):
+            if debug: print(f"load {path + file}")
+            f = h5.File(path + file, 'r')
+            img = torch.as_tensor(f['lightcones']['brightness_temp'], dtype=torch.float32)
+            # stuff good to know
+            if statistics and i % 10 == 0:
+                temp_lc = p21c.outputs.LightCone.read(path + file).lightcone_redshifts
+                zlc.append(temp_lc[redshift_cutoff])
+                zlc_min = temp_lc[0]
+            # load image
+            img = img[:,:,:redshift_cutoff]
+            # check if there are NaNs in the brightness map
+            if check_for_nan:
+                if torch.isnan(img).any():
+                    nan_counter.append(file)
+                    continue
 
-        new_format = {
-            "image": image,
-            "label": labels,
-            "tau": tau,
-            "z": lcone.lightcone_redshifts,
-            "gxH": gxH,
-            "distances": lcone.lightcone_distances
-        }
-        #save to new format
-        np.savez("temp" + ".npz", **new_format)
+            # check for zero brightness_temp
+            if statistics or remove_zeros:
+                if not torch.any(img):
+                    zeros.append(file)
+                    if remove_zeros:
+                        continue
 
+            img = torch.unsqueeze(img, 0)
+            #load labels, WDM,OMm,LX,E0,Tvir,Zeta
+            f_glob, f_cosmo, f_astro = dict(f['_globals'].attrs), dict(f['cosmo_params'].attrs), dict(f['astro_params'].attrs), 
+            label = torch.as_tensor([
+                f_glob["M_WDM"],
+                f_cosmo["OMm"],
+                f_astro["L_X"],
+                f_astro["NU_X_THRESH"],
+                f_astro["ION_Tvir_MIN"],
+                f_astro["HII_EFF_FACTOR"]
+            ], dtype=torch.float32)
+
+            if debug: print(f'{label=}')
+            
+            # load redshift
+            redshifts = torch.as_tensor(f["node_redshifts"], dtype=torch.float32)
+            # cut_idx = cut_z_idx(redshifts, z_cut)
+            # compute tau
+            gxH=torch.flip(torch.as_tensor(f["global_quantities"]["xH_box"], dtype=torch.float32), dims=[0])#[:cut_idx]
+            redshifts= torch.flip(redshifts, dims=[0])#[:cut_idx]
+            #print(redshifts)
+            tau=torch.as_tensor(compute_tau(redshifts=redshifts,global_xHI=gxH), dtype=torch.float32)
+
+            if statistics:
+                max_bt.append(float(img.max()))
+                min_bt.append(float(img.min()))
+                avg_bt.append(float(img.mean()))
+                taus.append(float(tau))
+
+            new_format = {
+                "images": np.asarray(img, dtype=float),
+                "labels": np.asarray(label, dtype=float),
+                "taus": np.asarray(tau, dtype=float),
+                "zs": np.asarray(redshifts, dtype=float),
+                "gxHs": np.asarray(gxH, dtype=float)
+            }
+            #save to new format
+            np.savez(new_format, path + f"batch_{i}" + ".npz")
+            fbar()
+    if statistics:
+        plt.rcParams['text.usetex'] = True
+        fig, ax = plt.subplots(2, 3, figsize=(12, 8))
+        ax[0,0].hist(x = min_bt, bins = 10)
+        ax[0,0].set_xlabel(r"$\max \delta T$")
+        ax[0,1].hist(x = max_bt, bins = 10)
+        ax[0,1].set_xlabel(r"$\min \delta T$")
+        ax[1,0].hist(x = avg_bt, bins = 10)
+        ax[1,0].set_xlabel("avg" + r"$ \delta T$")
+        ax[1,1].hist(x = taus, bins = 10)
+        ax[1,1].set_xlabel(r"$\tau$")
+        ax[0,0].set_ylabel("count")
+        ax[1,0].set_ylabel("count")
+        ax[0,2].hist(x = zlc, bins = 10)
+        ax[0,2].set_xlabel(r"$\max z$")
+        ax[0,2].set_ylabel(f"count / mean={round(np.mean(zlc),2)} and zlc_min={round(zlc_min,2)}")
+        ax[1,2].axis("off")
+        
+        fig.tight_layout()
+        fig.savefig("./convert_results.png", dpi=200)
+        fig.show()
+        print(len(zeros), " brightness_temps are zero at pos:\n", zeros)
+
+
+    print(f"Done, {len(nan_counter)} NaNs encountered in \n{nan_counter}")   
 
 
 def chunking(lst, n):
