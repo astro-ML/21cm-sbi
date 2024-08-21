@@ -39,7 +39,7 @@ class ModelHandler():
         with alive_bar(epochs, force_tty=True, refresh_secs=5) as bbar:
             for epoch in range(epochs):
                 self.Model.train()
-                for lab, img in self.TrainingD:
+                for lab, img, _ in self.TrainingD:
 
                     img, lab = img.to(self.device), lab.to(self.device)
 
@@ -71,8 +71,8 @@ class ModelHandler():
         Model.eval()
         test_loss = []
         with torch.no_grad():
-            for lab, img, tau in Validation_data:
-                img, lab, tau = img.to(device), lab.to(device)
+            for lab, img, _  in Validation_data:
+                img, lab,  = img.to(device), lab.to(device)
                 pred = Model(img)
                 test_loss.append(lossf(denormalize(pred), denormalize(lab)).to('cpu').item())
         if plot:
@@ -95,7 +95,7 @@ class ModelHandler():
         test_idx = np.random.randint(0, len(Validation_data), num_samples)
         test_loss = []
         with torch.no_grad():
-            for lab, img in Validation_data:
+            for lab, img, _ in Validation_data:
                 if num_samples > 0:
                     img, lab = img.to(device), lab.to('cpu')
                     pred = Model(img).to('cpu')
@@ -119,7 +119,7 @@ class ModelHandler():
     def full_inference(self, dataloader: object) -> torch.FloatTensor:
         with alive_bar(len(dataloader), force_tty=True) as bar:
             with torch.no_grad():
-                for i, (lab, img) in enumerate(dataloader):
+                for i, (lab, img, _) in enumerate(dataloader):
                     img, lab = img.to(self.device), lab.to(self.device)
                     
                     if not i:
@@ -150,7 +150,7 @@ class DataHandler():
     def __init__(self, path: str = "./", prefix: str = "batch_",
                  split: float = 1, training_data: bool = True, noise_model: object = None,
                  norm_range: torch.FloatTensor = None, apply_norm: bool = False, 
-                 augmentation_probability: float = 0.5, return_idx: bool = False) -> None:
+                 augmentation_probability: float = 0.5) -> None:
         #super().__init__()
         self.path = path
         self.prefix = prefix
@@ -159,7 +159,6 @@ class DataHandler():
         else: self.files = self.files[int(len(self.files)*split):]
         self.norm_range = norm_range
         self.apply_norm = apply_norm
-        self.return_idx = return_idx
 
         if 1 > augmentation_probability > 0:
             # augmentation probability
@@ -205,7 +204,7 @@ class DataHandler():
         if self.noise: images = self.noise_model(images)
         if self.apply_norm: images, labels = self.normalize(images=images, labels=labels)
         if self.augment_data: images = self.transforms(images)
-        return (labels, images, idx) if self.return_idx else (labels, images)
+        return (labels, images, idx)
     
     def save_file(self, file: str, data: dict) -> None:
             np.savez(file, **data)
