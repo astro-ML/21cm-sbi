@@ -75,8 +75,8 @@ def simulator(theta: torch.FloatTensor, Model: object, data_loader: object, thre
 
 if __name__ == '__main__':
     # hyperparams
-    data_path = "./data/"
-    train_test_data_ration = 0.95
+    data_path = "../archive/data_smol/"
+    train_test_data_ration = 1
 
     norm_range = torch.tensor([
                 [0.3,10.0], # M_WDM
@@ -90,7 +90,7 @@ if __name__ == '__main__':
 
     # transform trainingsdata
     # perhaps add check if file is there: continue + override option in the future
-    # convert_to_torch(path = data_path, prefix="run", redshift_cutoff=600, debug=False, statistics=False)
+    convert_to_torch(path = data_path, prefix="simrun", redshift_cutoff=600, debug=False, statistics=True)
 
     # load data
     train_data = DataHandler(path=data_path, prefix="batch", load_to_ram=False,
@@ -153,11 +153,15 @@ if __name__ == '__main__':
 
     # We draw theta samples from the posterior. This part is not in the scope of SBI
 
-    posterior_samples = train_data.denormalize(labels=posterior.sample((5000,)))
+    posterior_samples = train_data.denormalize(labels=posterior.sample((3000,)))
 
     # We use posterior theta samples to generate x data
 
+<<<<<<< HEAD
+    x_pp = simulator(theta = posterior_samples, Model = model, threads=32, data_loader=train_data)
+=======
     x_pp = simulator(theta = posterior_samples, Model = model, threads=1, data_loader=train_data)
+>>>>>>> 28be20d67b4e703df9282dbe28c157375d078f2f
 
     # We verify if the observed data falls within the support of the generated data
     fig, _ = analysis.pairplot(
@@ -166,7 +170,7 @@ if __name__ == '__main__':
         limits=[[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],], figsize=(5, 5),
         labels = ["M_WDM", "OMm", "L_X", "NU_X_THRESH", "ION_Tvir_MIN", "HII_EFF_FACTOR"],
     )
-    fig.savefig("sbc.png", dpi=300)
+    fig.savefig("ppc.png", dpi=300)
 
 
 

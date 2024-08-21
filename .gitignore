@@ -23,4 +23,6 @@ SNPE
 plots
 mptest.py
 plots
-
+nle.py
+npe.py
+ppc.py
