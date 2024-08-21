@@ -7,7 +7,6 @@ from typing import Callable
 print("CUDA is available: ", torch.cuda.is_available())
 from matplotlib.pyplot import imshow
 from alive_progress import alive_bar
-from ps2d_for_sbi import *
 from utility import *
 from torchvision.transforms import v2
 
