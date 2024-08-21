@@ -375,6 +375,84 @@ def convert_to_npz(path: str, prefix: str = "run_", check_for_nan: bool = True, 
     print(f"Done, {len(nan_counter)} NaNs encountered in \n{nan_counter}")   
 
 
+def convert_npz_to_pt(path: str, prefix: str = "run_", check_for_nan: bool = True, 
+                      debug: bool = False, remove_zeros: bool = True,
+                     redshift_cutoff: int = 0, statistics: bool = False) -> None:
+    '''Given a path and an optinal prefix 
+    (e.g. only convert all files named as run_, set prefix = "run_")
+    this function converts .h5 files from 21cmfastwrapper to the common .npz format'''
+    # image, label, tau, gxH
+    # search for all files given in a path given a prefix an loop over those
+    if statistics:
+        max_bt, min_bt, avg_bt = ([] for i in range(3))
+    if remove_zeros or statistics:
+        zeros = []
+    files = fnmatch.filter(os.listdir(path), prefix + "*")
+    if debug: print(f"{files}")
+    nan_counter = []
+    # zix = 88 #cut_z_idx(np.asarray(h5.File(path + files[0], 'r')["node_redshifts"]), z_cut)
+    with alive_bar(len(files), force_tty=True) as fbar:
+        for i, file in enumerate(files):
+            if debug: print(f"load {path + file}")
+            f = np.load(path + file)
+            img = torch.as_tensor(f['image'], dtype=torch.float32)
+            # stuff good to know
+
+            if redshift_cutoff > 0:
+                img = img[:,:,:redshift_cutoff]
+            # check if there are NaNs in the brightness map
+            if check_for_nan:
+                if torch.isnan(img).any():
+                    nan_counter.append(file)
+                    continue
+
+            # check for zero brightness_temp
+            if statistics or remove_zeros:
+                if (img == 0).all():
+                    zeros.append(file)
+                    if remove_zeros:
+                        continue
+
+            img = torch.unsqueeze(img, 0)
+
+            #load labels, WDM,OMm,LX,E0,Tvir,Zeta
+            label = torch.as_tensor(f['label'], dtype=torch.float32)
+
+            if debug: print(f'{label=}')
+
+            label = torch.unsqueeze(label, 0)
+
+            if statistics:
+                max_bt.append(float(img.max()))
+                min_bt.append(float(img.min()))
+                avg_bt.append(float(img.mean()))
+
+            new_format = {
+                "images": img,
+                "labels": label,
+            }
+            #save to new format
+            torch.save(new_format, path + f"batch_{i}" + ".pt")
+            fbar()
+
+        if statistics:
+            plt.rcParams['text.usetex'] = True
+            fig, ax = plt.subplots(1, 3, figsize=(12, 8))
+            ax[0].hist(x = min_bt, bins = 10)
+            ax[0].set_xlabel(r"$\max \delta T$")
+            ax[1].hist(x = max_bt, bins = 10)
+            ax[1].set_xlabel(r"$\min \delta T$")
+            ax[2].hist(x = avg_bt, bins = 10)
+            ax[2].set_xlabel("avg" + r"$ \delta T$")
+            
+            fig.tight_layout()
+            fig.savefig("./convert_results.png", dpi=200)
+            fig.show()
+            print(len(zeros), " brightness_temps are zero at pos:\n", zeros)
+
+
+    print(f"Done, {len(nan_counter)} NaNs encountered in \n{nan_counter}")   
+
 def chunking(lst, n):
     """Yield successive n-sized chunks from lst."""
     for i in range(0, len(lst), n):

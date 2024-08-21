@@ -157,7 +157,6 @@ class DataHandler():
         self.files = fnmatch.filter(os.listdir(path), prefix + "*" + ".pt")
         if training_data: self.files = self.files[:int(len(self.files)*split)]
         else: self.files = self.files[int(len(self.files)*split):]
-        self.fshape = torch.load(path + self.files[0])['images'].shape
         self.norm_range = norm_range
         self.apply_norm = apply_norm
         self.return_idx = return_idx
@@ -188,9 +187,10 @@ class DataHandler():
         return self.load_file(idx)
     
     def give_all(self):
-        img, lab = torch.empty((len(self), *self.fshape)),  torch.empty((len(self), 6))
         for i in range(len(self.files)):
             img[i], lab[i] = self.__getitem__(i)
+            if i == 0:
+                img, lab = torch.empty((len(self), *img.shape)),  torch.empty((len(self), 6))
         return lab, img
         
     def load_file(self, idx: int) -> tuple:
