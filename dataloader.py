@@ -203,6 +203,7 @@ class DataHandler():
         if self.noise: images = self.noise_model(images)
         if self.apply_norm: images, labels = self.normalize(images=images, labels=labels)
         if self.augment_data: images = self.transforms(images)
+        images = images.unsqueeze(0)
         return (labels, images, idx)
     
     def save_file(self, file: str, data: dict) -> None:

@@ -412,15 +412,11 @@ def convert_npz_to_pt(path: str, prefix: str = "run_", check_for_nan: bool = Tru
                     zeros.append(file)
                     if remove_zeros:
                         continue
-
-            img = torch.unsqueeze(img, 0)
-
+                    
             #load labels, WDM,OMm,LX,E0,Tvir,Zeta
             label = torch.as_tensor(f['label'], dtype=torch.float32)
 
             if debug: print(f'{label=}')
-
-            label = torch.unsqueeze(label, 0)
 
             if statistics:
                 max_bt.append(float(img.max()))
