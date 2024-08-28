@@ -155,9 +155,9 @@ def convert_to_torch(path: str, prefix: str = "run_", check_for_nan: bool = True
             new_format = {
                 "images": img,
                 "labels": label,
-                "taus": tau,
-                "zs": redshifts,
-                "gxHs": gxH
+                #"taus": tau,
+                #"zs": redshifts,
+                #"gxHs": gxH
             }
             #save to new format
             torch.save(new_format, path + f"batch_{i}" + ".pt")

@@ -195,7 +195,7 @@ class DataHandler():
     def load_file(self, idx: int) -> tuple:
         '''files should contain [batch_size, ...]'''
         file = self.files[idx]
-        data = torch.load(self.path + file)
+        data = torch.load(self.path + file, weights_only=False)
         images, labels = data['images'], data['labels']
         # TO-DO: Find better way to handle batch loading, right now only bathch loading with size of
         # 1 is possible and dimension is just thrown away
