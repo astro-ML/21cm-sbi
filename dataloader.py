@@ -60,6 +60,7 @@ class ModelHandler():
         plt.legend()
         plt.savefig("./run.png", dpi=400)
         plt.show()
+        plt.clf()
 
     def test_self(self):
         return ModelHandler.test(self.TestD, self.Model, self.lossf, plot = False, device=self.device)
