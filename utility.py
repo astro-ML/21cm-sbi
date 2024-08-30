@@ -123,7 +123,6 @@ def convert_to_torch(path: str, prefix: str = "run_", check_for_nan: bool = True
                     if remove_zeros:
                         continue
 
-            img = torch.unsqueeze(img, 0)
             #load labels, WDM,OMm,LX,E0,Tvir,Zeta
             f_glob, f_cosmo, f_astro = dict(f['_globals'].attrs), dict(f['cosmo_params'].attrs), dict(f['astro_params'].attrs), 
             label = torch.as_tensor([
@@ -309,7 +308,6 @@ def convert_to_npz(path: str, prefix: str = "run_", check_for_nan: bool = True, 
                     if remove_zeros:
                         continue
 
-            img = torch.unsqueeze(img, 0)
             #load labels, WDM,OMm,LX,E0,Tvir,Zeta
             f_glob, f_cosmo, f_astro = dict(f['_globals'].attrs), dict(f['cosmo_params'].attrs), dict(f['astro_params'].attrs), 
             label = torch.as_tensor([
@@ -408,7 +406,7 @@ def convert_npz_to_pt(path: str, prefix: str = "run_", check_for_nan: bool = Tru
 
             # check for zero brightness_temp
             if statistics or remove_zeros:
-                if (img == 0).all():
+                if not torch.any(img):
                     zeros.append(file)
                     if remove_zeros:
                         continue

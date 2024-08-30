@@ -1,7 +1,61 @@
 import torch
 from torch import nn
-#import FrEIA.framework as Ff
-#import FrEIA.modules as Fm
+import FrEIA.framework as Ff
+import FrEIA.modules as Fm
+from typing import Callable
+
+
+class flow_net(nn.Module):
+    def __init__(self, in_dim: int, n_blocks: int, n_nodes: int, cond_dim: int):
+        super().__init__()
+        self.in_dim = in_dim
+        self.n_blocks = n_blocks
+        self.n_nodes = n_nodes
+        self.cond_dim = cond_dim
+        self.Model = self.model(in_dim, n_blocks, n_nodes, cond_dim)
+        
+        
+        
+    def model(self, n_dim: int, n_blocks: int, n_nodes: int, cond_dims: int) -> Ff.SequenceINN:
+        """
+        Constructs the flow model.
+
+        Args:
+            n_dim (int): The dimensionality of the input.
+            n_blocks (int): The number of blocks in the model.
+            n_nodes (int): The number of nodes in the subnet.
+            cond_dims (tuple): The dimensions of the conditional input.
+
+        Returns:
+            Ff.SequenceINN: The constructed flow model.
+        """
+        def subnet_fc(dims_in: int, dims_out: int) -> nn.Sequential:
+            return nn.Sequential(nn.Linear(dims_in, n_nodes), nn.ReLU(),
+                                 nn.Linear(n_nodes, dims_out))
+        
+        flow = Ff.SequenceINN(n_dim)
+        permute_soft = True if n_dim != 1 else False
+        for k in range(n_blocks):
+            flow.append(Fm.AllInOneBlock, cond=0, cond_shape=([cond_dims]),
+                        subnet_constructor=subnet_fc, permute_soft=permute_soft)
+        return flow
+    
+    def forward(self, lab, cond):
+        return self.Model(lab, c=[cond])
+    
+    def sample(self, num_sampels: int, c: torch.FloatTensor, z: torch.FloatTensor = None,
+               device: str = 'cuda') -> torch.FloatTensor:
+        if z is None:
+            z = torch.randn(num_sampels, self.in_dim).to(device)
+        return self.Model(z, c = [c.repeat((num_sampels,1)).to(device)], rev=True)
+    
+    def loss(self, lab: torch.FloatTensor, cond: torch.FloatTensor, loss: Callable) -> torch.FloatTensor:
+        z, jac = self.Model(lab, c=[cond], rev=False)
+        loss = 0.5*torch.sum(z**2,1) - jac
+        loss = loss.mean() / self.in_dim
+        return loss
+        
+        
 
 class Summary_net_lc(nn.Module):
     def __init__(self):

@@ -1,10 +1,13 @@
-import torch
+from models import *
+from logging import info, warning, error
 from matplotlib import pyplot as plt
 import os, fnmatch, sys
 import numpy as np
 from torch.utils.data import DataLoader
 from typing import Callable
-print("CUDA is available: ", torch.cuda.is_available())
+for i in range(torch.cuda.device_count()):
+   print(torch.cuda.get_device_properties(i).name)
+
 from matplotlib.pyplot import imshow
 from alive_progress import alive_bar
 from utility import *
@@ -12,16 +15,66 @@ from torchvision.transforms import v2
 
 
 # write additional class for model itself
+        
+                
+class DensnetHandler():
+    def __init__(self, Model: object, Training_data: object = None, Test_data: object = None, device = "cuda"):
+        self.TrainingD = Training_data
+        self.TestD = Test_data
+        self.device = device
+        self.xshape = Training_data.dataset[0][1].shape
+        self.yshape = Training_data.dataset[0][0].shape
+        self.in_dim = self.yshape[-1]
+        self.out_dim = self.yshape[-1]
+        self.Model = Model(in_dim = self.in_dim, n_blocks=6, n_nodes=60, cond_dims=self.in_dim).to(device)
+        
+    def train(self, epochs: int,
+                lossf: Callable, optimizer: object,  plot: bool = True):
+            self.lossf = lossf
+            self.optimizer = optimizer
+    
+            losstrain = []
+            losstest = []
+            with alive_bar(epochs, force_tty=True, refresh_secs=5) as bbar:
+                for epoch in range(epochs):
+                    self.Model.train()
+                    for lab, img, _ in self.TrainingD:
+    
+                        img, lab = img.to(self.device), lab.to(self.device)
+    
+    
+                        loss = self.Model.loss(lab=lab, cond=img, loss=self.lossf)
+                        loss.backward()
+                        self.optimizer.step()
+                        self.optimizer.zero_grad()
+                        losstrain.append(loss.item())
+                    losstest.append(self.test_self())
+                    bbar()
+            if plot:
+                plt.plot(np.linspace(0, epochs, len(losstrain)), losstrain, label='Trainingsloss', alpha=0.5)
+                plt.plot(np.linspace(0, epochs, len(losstest)), losstest, label='Testloss')
+                plt.xlabel("epochs")
+                plt.ylabel("loss")
+                #plt.yscale('log')
+                #plt.xticks(np.linspace(0,epochs*lentrain,10, dtype=int), np.linspace(0,epochs,10, dtype=int))
+                plt.legend()
+                plt.savefig("./run.png", dpi=400)
+                plt.show()
+                plt.clf()
+                
+    def sample(self, num_sampels: int, c: torch.FloatTensor, z: torch.FloatTensor = None) -> torch.FloatTensor:
+        if z is None:
+            z = torch.randn(num_sampels, self.out_dim).to(self.device)
+        return self.Model(z, c = [c.repeat((num_sampels,1)).to(self.device)], rev=True)
+    
+    def save(self, path: str = "de_model.pt"):
+        torch.save(self.Model.state_dict(), path)
+    
+    def load(self, path: str = "de_model.pt"):
+        self.Model.load_state_dict(torch.load(path, map_location=torch.device(self.device)))
+        self.Model.eval()
 
-
-'''
-class SBIHandler(ModelHandler):
-    def __init__(self, )
-'''
-
-
-
-class ModelHandler():
+class SumnetHandler():
     def __init__(self, Model: object, Training_data: object = None, Test_data: object = None, device = "cuda"):
         self.Model = Model().to(device)
         self.TrainingD = Training_data
@@ -29,7 +82,7 @@ class ModelHandler():
         self.device = device
     
     def train(self, epochs: int, 
-              lossf: Callable, optimizer: object):
+              lossf: Callable, optimizer: object,  plot: bool = True):
         self.lossf = lossf
         self.optimizer = optimizer
 
@@ -51,19 +104,20 @@ class ModelHandler():
                     losstrain.append(loss.item())
                 losstest.append(self.test_self())
                 bbar()
-        plt.plot(np.linspace(0, epochs, len(losstrain)), losstrain, label='Trainingsloss', alpha=0.5)
-        plt.plot(np.linspace(0, epochs, len(losstest)), losstest, label='Testloss')
-        plt.xlabel("epochs")
-        plt.ylabel("loss")
-        #plt.yscale('log')
-        #plt.xticks(np.linspace(0,epochs*lentrain,10, dtype=int), np.linspace(0,epochs,10, dtype=int))
-        plt.legend()
-        plt.savefig("./run.png", dpi=400)
-        plt.show()
-        plt.clf()
+        if plot:
+            plt.plot(np.linspace(0, epochs, len(losstrain)), losstrain, label='Trainingsloss', alpha=0.5)
+            plt.plot(np.linspace(0, epochs, len(losstest)), losstest, label='Testloss')
+            plt.xlabel("epochs")
+            plt.ylabel("loss")
+            #plt.yscale('log')
+            #plt.xticks(np.linspace(0,epochs*lentrain,10, dtype=int), np.linspace(0,epochs,10, dtype=int))
+            plt.legend()
+            plt.savefig("./run.png", dpi=400)
+            plt.show()
+            plt.clf()
 
     def test_self(self):
-        return ModelHandler.test(self.TestD, self.Model, self.lossf, plot = False, device=self.device)
+        return SumnetHandler.test(self.TestD, self.Model, self.lossf, plot = False, device=self.device)
 
     @staticmethod
     def test(Validation_data: object, Model: object, lossf: Callable, plot: bool = True, device = 'cuda',
@@ -133,10 +187,10 @@ class ModelHandler():
         return (summary_vec, labels)
             
 
-    def save_model(self, name: str = "model.pt"):
+    def save(self, name: str = "model.pt"):
         torch.save(self.Model.state_dict(), name)
 
-    def load_model(self, name: str = "model.pt"):
+    def load(self, name: str = "model.pt"):
         self.Model.load_state_dict(torch.load(name, map_location=torch.device(self.device)))
         self.Model.eval()
 
@@ -338,4 +392,173 @@ class Transpose(torch.nn.Module):
         else:
             return img
         
+        
+        
+        
+class SBIHandler():
+    def __init__(self, density_estimator: DensnetHandler, prior: Callable, summary_net: SumnetHandler = None,
+                 device = 'cuda'):
+        self.density_estimator = density_estimator
+        if summary_net is None:
+            self.sum_net = False
+        else:
+            self.sum_net = True
+            self.summary_net = summary_net
+        self.prior = prior
+        self.summary_net = summary_net
+        self.device = device
+        
+        info("Succesfully initialized SBIHandler")
+        
+    def train(self, training_data: object, test_data: object, epochs: int = 20, summary_net_freezed_epochs: int = 0, summary_net_pretrain_epochs: int = 0, optimizer = torch.optim.Adam,
+              optimizer_kwargs: dict = {"lr": 1e-4}, loss_function: Callable = torch.nn.MSELoss, loss_params: dict = {}, device: str = None, plot: bool = True):
+        if device is None: 
+            device = self.device
+            info(f"Using device {device}")
+        info("Begin training...")
+        
+        loss_function = loss_function(**loss_params)
+        
+        if self.sum_net:
+            self.summary_net.to(device)
+        self.density_estimator.to(device)
+        
+        # pretrain summary_net
+        if summary_net_pretrain_epochs > 0:
+            summary_net = SumnetHandler(self.summary_net, training_data, test_data, device)
+            summary_net.train(summary_net_pretrain_epochs, loss_function, optimizer(self.summary_net.parameters(), **optimizer_kwargs))
+            summary_net = summary_net.Model
+        
+        # begin main trainingsloop
+        
+        with alive_bar(epochs, force_tty=True, refresh_secs=5) as bar:
+                        
+            train_loss_de, test_loss_de = [], []
+            if self.sum_net:
+                train_loss_sn, test_loss_sn = [], []
+            
+            # training loop
+            for epoch in range(epochs):
+                
+                # initialize optimizer
+                if self.sum_net and epoch == summary_net_freezed_epochs:
+                    info("Initialize optimizer for joint training...")
+                    self.optimizer = optimizer(list(self.density_estimator.parameters()) + list(self.summary_net.parameters()), **optimizer_kwargs)
+                if not self.sum_net or ( epoch == 0 and epoch < summary_net_freezed_epochs):
+                    info("Initialize optimizer for density estimator training with freezed summary...")
+                    self.optimizer = optimizer(self.density_estimator.parameters(), **optimizer_kwargs)
+                
+                self.density_estimator.train()
+                if self.sum_net and epoch < summary_net_freezed_epochs:
+                    self.summary_net.eval()
+                else:
+                    self.summary_net.train()
+                    
+                train_loss_de_tmp = 0
+                if self.sum_net:
+                    train_loss_sn_tmp = 0
+                    
+                    
+                for lab, img, _ in training_data:
+                    
+                    img, lab = img.to(device), lab.to(device)
+                    if self.sum_net:
+                        if epoch < summary_net_freezed_epochs:
+                            summary = self.summary_net(img).detach()
+                        else:
+                            summary = self.summary_net(img)
+                        train_loss_sn_tmp += loss_function(summary, lab).mean().item()
+                        
+                    else:
+                        summary = img
+                    if summary.shape != lab.shape:
+                        raise error(f"Summary {summary.shape} and label {lab.shape} shape do not match")                    
+                    # computing loss
+                    
+                    loss = self.density_estimator.loss(lab, cond=summary, loss=loss_function)
+                    loss.backward()
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    
+                    train_loss_de_tmp += loss.item()
+                    
+                # testing loop
+                test_loss_de_tmp, test_loss_sn_tmp = self.test_self(test_data)
+                    
+                train_loss_de.append(train_loss_de_tmp / len(training_data))
+                test_loss_de.append(test_loss_de_tmp)
+                if self.sum_net:
+                    train_loss_sn.append(train_loss_sn_tmp / len(training_data))
+                    test_loss_sn.append(test_loss_sn_tmp)
+                    
+                bar()
+        if plot:      
+            plt.plot(np.linspace(0, epochs, len(train_loss_de)), train_loss_de, label='Trainingsloss DE', alpha=0.5)
+            plt.plot(np.linspace(0, epochs, len(test_loss_de)), test_loss_de, label='Testloss DE')
+            if self.sum_net:
+                plt.plot(np.linspace(0, epochs, len(train_loss_sn)), train_loss_sn, label='Trainingsloss SN', alpha=0.5)
+                plt.plot(np.linspace(0, epochs, len(test_loss_sn)), test_loss_sn, label='Testloss SN')
+            plt.xlabel("epochs")
+            plt.ylabel("loss")
+            plt.legend()
+            plt.savefig("./training.png", dpi=400)
+            plt.show()
+            plt.clf()
+            
+            
+    def test_self(self, validation_data: object, loss_function: Callable = torch.nn.MSELoss()):
+        return SBIHandler.test(Validation_data=validation_data,
+                               density_model=self.density_estimator,
+                               lossf=loss_function,
+                               summary_model=self.summary_net,
+                               plot=False,
+                               device=self.device)
+        
+    def save_model(self, path: str = "./"):
+        torch.save(self.density_estimator.state_dict(), path + "density_model.pt")
+        torch.save(self.summary_net.state_dict(), path + "summary_model.pt")
+        
+    def load_model(self, path: str = "./"):
+        self.density_estimator.load_state_dict(torch.load(path + "density_model.pt"))
+        self.density_estimator.to(self.device)
+        self.density_estimator.eval()
+        self.summary_net.load_state_dict(torch.load(path + "summary_model.pt"))
+        self.summary_net.to(self.device)
+        self.summary_net.eval()
+
+    @staticmethod
+    def test(Validation_data: object, density_model: object, lossf: Callable, summary_model: object = None, plot: bool = True, device = 'cuda',
+            denormalize: Callable = (lambda x: x)):
+        summary_model.eval()
+        density_model.eval()
+        if summary_model is None:
+            sum_net = False
+        else:
+            sum_net = True
+        test_loss_de_tmp = 0
+        if sum_net:
+            test_loss_sn_tmp = 0
+        with torch.no_grad():
+            for lab, img, _  in Validation_data:
+                img, lab,  = img.to(device), lab.to(device)
+                if sum_net:
+                    summary = summary_model(img)
+                    test_loss_sn_tmp += lossf(summary, lab).mean().item()
+                else:  
+                    summary = img
+                z, jac = density_model(lab, cond=summary)
+                loss = 0.5*torch.sum(z**2,1) - jac
+                loss = loss.mean() / lab.shape[-1]
+                test_loss_de_tmp += loss.item() 
+        
+        if plot:
+            if len(test_loss_de_tmp) > 1:
+                plt.hist(test_loss_de_tmp)
+                plt.title(f'test loss: {np.mean(test_loss_de_tmp)}')
+                plt.xlabel("loss")
+                plt.ylabel("count")
+                plt.savefig("./eval.png", dpi=400)
+                plt.show()
+        else: 
+            return test_loss_de_tmp / len(Validation_data), test_loss_sn_tmp / len(Validation_data)
         
