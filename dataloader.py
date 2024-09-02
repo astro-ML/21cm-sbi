@@ -191,7 +191,7 @@ class SumnetHandler():
         torch.save(self.Model.state_dict(), name)
 
     def load(self, name: str = "model.pt"):
-        self.Model.load_state_dict(torch.load(name, map_location=torch.device(self.device)))
+        self.Model.load_state_dict(torch.load(name, map_location=torch.device(self.device), weights_only=True))
         self.Model.eval()
 
 
@@ -396,7 +396,7 @@ class Transpose(torch.nn.Module):
         
         
 class SBIHandler():
-    def __init__(self, density_estimator: DensnetHandler, prior: Callable, summary_net: SumnetHandler = None,
+    def __init__(self, density_estimator: DensnetHandler, summary_net: SumnetHandler = None,
                  device = 'cuda'):
         self.density_estimator = density_estimator
         if summary_net is None:
@@ -404,7 +404,6 @@ class SBIHandler():
         else:
             self.sum_net = True
             self.summary_net = summary_net
-        self.prior = prior
         self.summary_net = summary_net
         self.device = device
         

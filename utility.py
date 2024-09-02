@@ -102,7 +102,7 @@ def convert_to_torch(path: str, prefix: str = "run_", check_for_nan: bool = True
         for i, file in enumerate(files):
             if debug: print(f"load {path + file}")
             f = h5.File(path + file, 'r')
-            img = torch.as_tensor(f['lightcones']['brightness_temp'], dtype=torch.float32)
+            img = torch.as_tensor(np.array(f['lightcones']['brightness_temp']), dtype=torch.float32)
             # stuff good to know
             if statistics and i % 10 == 0:
                 temp_lc = p21c.outputs.LightCone.read(path + file).lightcone_redshifts

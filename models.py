@@ -140,7 +140,8 @@ class Summary_net_lc_lil(nn.Module):
         #x = nn.functional.adaptive_avg_pool3d(x, (1, 1, 1)).view(x.size(0), -1)
         x = self.fc_layers(x)
         return x
-    
+
+# wants (28,28,680) input
 class Summary_net_lc_smol(nn.Module):
     def __init__(self):
         super().__init__()
@@ -165,8 +166,8 @@ class Summary_net_lc_smol(nn.Module):
             nn.BatchNorm3d(128),
         )
         self.pooling = nn.Sequential(
-            nn.MaxPool3d(kernel_size=3, stride=3, padding=1),
-            nn.AvgPool3d(kernel_size=2, stride=2, padding=0)
+            nn.MaxPool3d(kernel_size=(3,3,2), stride=2, padding=(1,1,0)),
+            nn.AvgPool3d(kernel_size=(3,3,3), stride=1, padding=0)
         )
         
         self.fc_layers = nn.Sequential(
@@ -190,6 +191,7 @@ class Summary_net_lc_smol(nn.Module):
         x = self.fc_layers(x)
         return x
     
+# wants (28,28,470) input
 class Summary_net_lc_super_smol(nn.Module):
     def __init__(self):
         super().__init__()
