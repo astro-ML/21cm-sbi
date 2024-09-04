@@ -38,27 +38,28 @@ class cMAF(nn.Module):
             nn.ReLU(),
             ConditionalMaskedLinear(hidden_dim, hidden_dim, condition_dim, mask),
             nn.ReLU(),
+            nn.BatchNorm1d(hidden_dim),
             ConditionalMaskedLinear(hidden_dim, 2 * input_dim, condition_dim, mask)
         )
 
-    def forward(self, x, condition):
+    def forward(self, x, cond):
         log_det_jacobians = 0
         for flow in self.flows:
-            m, s = flow(x, condition).chunk(2, dim=1)
+            m, s = flow(x, cond).chunk(2, dim=1)
             s = torch.tanh(s)  # Stability for scaling
             x = x * torch.exp(s) + m
             log_det_jacobians += s.sum(-1)
         return x, log_det_jacobians
 
-    def log_prob(self, x, condition):
-        z, log_det_jacobians = self.forward(x, condition)
+    def loss(self, x: torch.FloatTensor, cond: torch.FloatTensor) -> torch.FloatTensor:
+        z, log_det_jacobians = self.forward(x, cond)
         log_prob = self.base_dist.log_prob(z).sum(-1)
         return log_prob + log_det_jacobians
 
-    def sample(self, num_samples, condition):
+    def sample(self, num_samples: int, cond: torch.FloatTensor) -> torch.FloatTensor:
         z = self.base_dist.sample((num_samples,))
         for flow in reversed(self.flows):
-            m, s = flow(z, condition).chunk(2, dim=1)
+            m, s = flow(z, cond).chunk(2, dim=1)
             s = torch.tanh(s)
             z = (z - m) * torch.exp(-s)
         return z
@@ -101,17 +102,16 @@ class in_net(nn.Module):
                         subnet_constructor=subnet_fc, permute_soft=permute_soft)
         return flow
     
-    def forward(self, lab, cond):
-        return self.Model(lab, c=[cond])
+    def forward(self, x, cond):
+        return self.Model(x, c=[cond])
     
-    def sample(self, num_sampels: int, c: torch.FloatTensor, z: torch.FloatTensor = None,
+    def sample(self, num_samples: int, cond: torch.FloatTensor,
                device: str = 'cuda') -> torch.FloatTensor:
-        if z is None:
-            z = torch.randn(num_sampels, self.in_dim).to(device)
-        return self.Model(z, c = [c.repeat((num_sampels,1)).to(device)], rev=True)
+        z = torch.randn(num_samples, self.in_dim).to(device)
+        return self.Model(z, c = [cond.repeat((num_samples,1)).to(device)], rev=True)
     
-    def loss(self, lab: torch.FloatTensor, cond: torch.FloatTensor, loss: Callable) -> torch.FloatTensor:
-        z, jac = self.Model(lab, c=[cond], rev=False)
+    def loss(self, x: torch.FloatTensor, cond: torch.FloatTensor) -> torch.FloatTensor:
+        z, jac = self.Model(x, c=[cond], rev=False)
         loss = 0.5*torch.sum(z**2,1) - jac
         loss = loss.mean() / self.in_dim
         return loss

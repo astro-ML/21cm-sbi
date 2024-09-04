@@ -29,7 +29,7 @@ class DensnetHandler():
         self.Model = Model(in_dim = self.in_dim, n_blocks=6, n_nodes=60, cond_dims=self.in_dim).to(device)
         
     def train(self, epochs: int,
-                lossf: Callable, optimizer: object,  plot: bool = True):
+                optimizer: object, lossf: Callable = nn.MSELoss(), plot: bool = True):
             self.lossf = lossf
             self.optimizer = optimizer
     
@@ -43,7 +43,7 @@ class DensnetHandler():
                         img, lab = img.to(self.device), lab.to(self.device)
     
     
-                        loss = self.Model.loss(lab=lab, cond=img, loss=self.lossf)
+                        loss = self.Model.loss(x=lab, cond=img)
                         loss.backward()
                         self.optimizer.step()
                         self.optimizer.zero_grad()
@@ -62,10 +62,10 @@ class DensnetHandler():
                 plt.show()
                 plt.clf()
                 
-    def sample(self, num_sampels: int, c: torch.FloatTensor, z: torch.FloatTensor = None) -> torch.FloatTensor:
+    def sample(self, num_samples: int, c: torch.FloatTensor, z: torch.FloatTensor = None) -> torch.FloatTensor:
         if z is None:
-            z = torch.randn(num_sampels, self.out_dim).to(self.device)
-        return self.Model(z, c = [c.repeat((num_sampels,1)).to(self.device)], rev=True)
+            z = torch.randn(num_samples, self.out_dim).to(self.device)
+        return self.Model(z, c = [c.repeat((num_samples,1)).to(self.device)], rev=True)
     
     def save(self, path: str = "de_model.pt"):
         torch.save(self.Model.state_dict(), path)
@@ -82,7 +82,7 @@ class SumnetHandler():
         self.device = device
     
     def train(self, epochs: int, 
-              lossf: Callable, optimizer: object,  plot: bool = True):
+              optimizer: object, lossf: Callable = nn.MSELoss(), plot: bool = True):
         self.lossf = lossf
         self.optimizer = optimizer
 
@@ -474,7 +474,7 @@ class SBIHandler():
                         raise error(f"Summary {summary.shape} and label {lab.shape} shape do not match")                    
                     # computing loss
                     
-                    loss = self.density_estimator.loss(lab, cond=summary, loss=loss_function)
+                    loss = self.density_estimator.loss(lab, cond=summary)
                     loss.backward()
                     self.optimizer.step()
                     self.optimizer.zero_grad()
