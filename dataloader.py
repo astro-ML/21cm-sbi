@@ -12,6 +12,9 @@ from matplotlib.pyplot import imshow
 from alive_progress import alive_bar
 from utility import *
 from torchvision.transforms import v2
+from plot import pairplot
+from torchsummary import summary
+from scipy.stats import kstest, uniform, gaussian_kde
 
 
 # write additional class for model itself
@@ -410,7 +413,14 @@ class SBIHandler():
         info("Succesfully initialized SBIHandler")
         
     def train(self, training_data: object, test_data: object, epochs: int = 20, summary_net_freezed_epochs: int = 0, summary_net_pretrain_epochs: int = 0, optimizer = torch.optim.Adam,
-              optimizer_kwargs: dict = {"lr": 1e-4}, loss_function: Callable = torch.nn.MSELoss, loss_params: dict = {}, device: str = None, plot: bool = True):
+              optimizer_kwargs: dict = {"lr": 1e-4}, loss_function: Callable = torch.nn.MSELoss, loss_params: dict = {}, device: str = None, plot: bool = True,
+              grad_clip: float = 0):
+        
+        if grad_clip > 0:
+            grad_clipping = True
+        else:
+            grad_clipping = False
+            
         if device is None: 
             device = self.device
             info(f"Using device {device}")
@@ -474,15 +484,22 @@ class SBIHandler():
                         raise error(f"Summary {summary.shape} and label {lab.shape} shape do not match")                    
                     # computing loss
                     
-                    loss = self.density_estimator.loss(lab, cond=summary)
+                    loss = self.density_estimator.loss(lab, cond=summary).mean(0)
                     loss.backward()
+                    
+                    # grad clipping
+                    if grad_clipping:
+                        torch.nn.utils.clip_grad_norm_(self.density_estimator.parameters(), grad_clip)
+                        if self.sum_net:
+                            torch.nn.utils.clip_grad_norm_(self.summary_net.parameters(), grad_clip)
+                    
                     self.optimizer.step()
                     self.optimizer.zero_grad()
                     
                     train_loss_de_tmp += loss.item()
                     
                 # testing loop
-                test_loss_de_tmp, test_loss_sn_tmp = self.test_self(test_data)
+                test_loss_de_tmp, test_loss_sn_tmp = self.test_self(test_data, loss_function)
                     
                 train_loss_de.append(train_loss_de_tmp / len(training_data))
                 test_loss_de.append(test_loss_de_tmp)
@@ -495,23 +512,36 @@ class SBIHandler():
             plt.plot(np.linspace(0, epochs, len(train_loss_de)), train_loss_de, label='Trainingsloss DE', alpha=0.5)
             plt.plot(np.linspace(0, epochs, len(test_loss_de)), test_loss_de, label='Testloss DE')
             if self.sum_net:
-                plt.plot(np.linspace(0, epochs, len(train_loss_sn)), train_loss_sn, label='Trainingsloss SN', alpha=0.5)
-                plt.plot(np.linspace(0, epochs, len(test_loss_sn)), test_loss_sn, label='Testloss SN')
+                plt.plot(np.linspace(0, epochs, len(train_loss_sn)), np.log(train_loss_sn), label='Trainingsloss SN', alpha=0.5)
+                plt.plot(np.linspace(0, epochs, len(test_loss_sn)), np.log(test_loss_sn), label='Testloss SN')
             plt.xlabel("epochs")
             plt.ylabel("loss")
+            plt.title("Log loss during training")
             plt.legend()
-            plt.savefig("./training.png", dpi=400)
+            plt.savefig("./training_loss.png", dpi=400)
             plt.show()
             plt.clf()
-            
-            
+    
+    @torch.no_grad()   
     def test_self(self, validation_data: object, loss_function: Callable = torch.nn.MSELoss()):
-        return SBIHandler.test(Validation_data=validation_data,
-                               density_model=self.density_estimator,
-                               lossf=loss_function,
-                               summary_model=self.summary_net,
-                               plot=False,
-                               device=self.device)
+        if self.sum_net:
+            self.summary_net.eval()
+        self.density_estimator.eval()
+        test_loss_de_tmp = 0
+        if self.sum_net:
+            test_loss_sn_tmp = 0
+        for lab, img, _  in validation_data:
+            img, lab,  = img.to(self.device), lab.to(self.device)
+            if self.sum_net:
+                summary = self.summary_net(img)
+                test_loss_sn_tmp += loss_function(summary, lab).mean().item()
+            else:  
+                summary = img
+            loss = self.density_estimator.loss(lab, cond=summary).mean()
+            test_loss_de_tmp += loss.item() 
+        return test_loss_de_tmp / len(validation_data), test_loss_sn_tmp / len(validation_data)
+
+
         
     def save_model(self, path: str = "./"):
         torch.save(self.density_estimator.state_dict(), path + "density_model.pt")
@@ -525,39 +555,123 @@ class SBIHandler():
         self.summary_net.to(self.device)
         self.summary_net.eval()
 
-    @staticmethod
-    def test(Validation_data: object, density_model: object, lossf: Callable, summary_model: object = None, plot: bool = True, device = 'cuda',
-            denormalize: Callable = (lambda x: x)):
-        summary_model.eval()
-        density_model.eval()
-        if summary_model is None:
-            sum_net = False
-        else:
-            sum_net = True
-        test_loss_de_tmp = 0
-        if sum_net:
-            test_loss_sn_tmp = 0
-        with torch.no_grad():
-            for lab, img, _  in Validation_data:
-                img, lab,  = img.to(device), lab.to(device)
-                if sum_net:
-                    summary = summary_model(img)
-                    test_loss_sn_tmp += lossf(summary, lab).mean().item()
-                else:  
-                    summary = img
-                z, jac = density_model(lab, cond=summary)
-                loss = 0.5*torch.sum(z**2,1) - jac
-                loss = loss.mean() / lab.shape[-1]
-                test_loss_de_tmp += loss.item() 
+    @torch.no_grad()
+    def test(self, val_data: object = None, plotname: str = "", nsamples: int = 10000):
+        self.density_estimator.eval()
+        if self.sum_net:
+            self.summary_net.eval()
+            
+        for i in range(3):
+            lab, img, _ = val_data.dataset[i]
+
+            lab, img = lab.to(self.device), img.to(self.device)
+            img = img.unsqueeze(0)
+
+            if self.sum_net:
+                summary = self.summary_net(img)
+            else:
+                summary = img
+
+            samples, _ = self.density_estimator.sample(nsamples, summary)
+            # plot posterior samples
+            figure, axis = pairplot(samples = samples.detach().to('cpu').numpy(), points=lab.detach().to('cpu').numpy(),
+                limits=[[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],], figsize=(10, 10),
+                labels = [r"$M_{WDM}$", r"$\Omega_m$", r"$L_X$", r"$E_0$", r"$T_{vir, ion}$", r"$\zeta$"],
+                #quantiles=((0.16, 0.84, 0.0015, 0.99815)), levels=(1 - np.exp(-0.5),1 - np.exp(-9/2)),
+                upper = 'hist', lower = 'contour', diag = 'kde')
+            if plotname != "": figure.savefig(f"{plotname}_{i}.png", dpi=300)
+            figure.show()
+    
+    @torch.no_grad()
+    def run_sbc(self, Validation_Dataset = None, num_samples: int = 1000, num_workers: int = 1,
+                plotname: str = ""):
         
-        if plot:
-            if len(test_loss_de_tmp) > 1:
-                plt.hist(test_loss_de_tmp)
-                plt.title(f'test loss: {np.mean(test_loss_de_tmp)}')
-                plt.xlabel("loss")
-                plt.ylabel("count")
-                plt.savefig("./eval.png", dpi=400)
-                plt.show()
-        else: 
-            return test_loss_de_tmp / len(Validation_data), test_loss_sn_tmp / len(Validation_data)
         
+        save = False if plotname == "" else True 
+        
+        self.density_estimator.eval()
+        if self.sum_net:
+            self.summary_net.eval()
+        #mp = True if num_workers > 1 else False
+        # run sbc on full Validation Dataset
+        info("Run SBC...")
+        for i, (lab, img,_) in enumerate(Validation_Dataset):
+            img, lab = img.to(self.device), lab.to(self.device)
+            
+            if not i:
+                summary_vec = torch.empty(0,lab.shape[1], device=self.device)
+                labels = torch.empty(0,lab.shape[1], device=self.device)
+
+            pred = self.summary_net(img)
+            summary_vec = torch.cat((summary_vec, pred), dim=0)
+            labels = torch.cat((labels, lab), dim=0)
+
+        ranks = torch.empty(summary_vec.shape)
+        dap_samples = torch.empty((summary_vec.shape[0], summary_vec.shape[1]))
+        # sbc rank stat
+        with alive_bar(summary_vec.shape[0], force_tty=True, refresh_secs=1) as bar:
+            for i in range(summary_vec.shape[0]):
+                samples, _ = self.density_estimator.sample(x = summary_vec[i].unsqueeze(0), num_samples=num_samples)
+                dap_samples[i] = samples[0]
+                for j in range(summary_vec.shape[1]):
+                    ranks[i,j] = (samples[:,j]<labels[i,j]).sum().item()
+                bar()
+                
+        # plot rank statistics
+        
+        labels_txt = [r"$M_\text{WDM}$", r"$\Omega_m$", r"$L_X$", r"$E_0$", r"$T_\text{vir, ion}$", r"$\zeta$"]
+        fig, ax = plt.subplots(1,summary_vec.shape[1], figsize=(5*summary_vec.shape[1],5))
+        for i in range(summary_vec.shape[1]):
+            ax[i].hist(ranks[:,i].cpu().numpy(), bins=50, range=(0, num_samples), density=True)
+            ax[i].set_title(f"{labels_txt[i]}")
+            ax[i].set_xlabel("Rank")
+            kde = gaussian_kde(ranks[:,i].cpu().numpy())
+            xx = np.linspace(0, num_samples, num_samples)
+            ax[i].plot(xx, kde(xx), c='orange')
+        if save: fig.savefig(f"{plotname}_rank_stat.png", dpi=400)
+        fig.show()
+        fig.clf()
+        
+
+
+        # ks_pvals: check how uniform the ranks are (frequentist approach)
+        kstest_pvals = torch.tensor(
+        [
+            kstest(rks, uniform(loc=0, scale=num_samples).cdf)[1]
+            for rks in ranks.T
+        ],
+        dtype=torch.float32,
+        )
+        print(kstest_pvals)
+        
+        # c2st, train a small classifier to distinguish between samples from rank and uniform distribution
+        # if 0.5, both a equal = classifier is not able to distinguish the two distributions
+        
+        # compute tarp
+        bins = int(np.sqrt(num_samples))
+        sorted_labels, idx = torch.sort(labels, dim=0)
+        sorted_samples = torch.gather(dap_samples.cpu(), dim=0, index=idx.cpu())
+        fig, ax = plt.subplots(1,summary_vec.shape[1], figsize=(5*summary_vec.shape[1],5), sharey=True)
+        h = []
+        for i in range(summary_vec.shape[1]):
+            h.append(ax[i].hist2d(sorted_labels[:,i].cpu().numpy(), sorted_samples[:,i].cpu().numpy(), 
+                             bins=bins, range=[[0,1],[0,1]], density=True)[0].max())
+        vmax = np.max(h)
+        for i in range(summary_vec.shape[1]):
+            h = ax[i].hist2d(sorted_labels[:,i].cpu().numpy(), sorted_samples[:,i].cpu().numpy(), 
+                             bins=bins, range=[[0,1],[0,1]], density=True, vmin=0, vmax=vmax)
+            ax[i].plot([0,1],[0,1], c='black', linestyle='--', lw=2)
+            ax[i].set_title(rf"{labels_txt[i]}")
+            ax[i].set_aspect('equal', 'box')
+            ax[i].set_xlabel("Truth")
+            ax[i].set_ylabel("Predicted")
+        #fig.subplots_adjust(right=0.8)
+        #cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+        fig.colorbar(h[3], cax=ax[-1])
+        if save: fig.savefig(f"{plotname}_tarp.png", dpi=400)
+        fig.show()
+        fig.clf()
+        
+        # Local Classifier Two-Sample Tests
+        
+        # sensitivity analysis

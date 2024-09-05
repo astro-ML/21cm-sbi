@@ -2,81 +2,40 @@ import torch
 from torch import nn
 import FrEIA.framework as Ff
 import FrEIA.modules as Fm
-from typing import Callable
+from typing import Callable, List, Tuple
 import torch.nn.functional as F
 from torch.distributions import Normal
-
-# MAF
-
-class ConditionalMaskedLinear(nn.Linear):
-    def __init__(self, in_features, out_features, condition_dim, mask):
-        super().__init__(in_features + condition_dim, out_features)
-        self.register_buffer('mask', mask)
-        self.condition_dim = condition_dim
-
-    def forward(self, x, condition):
-        # Concatenate input with condition
-        x_cond = torch.cat([x, condition], dim=1)
-        return F.linear(x_cond, self.weight * self.mask, self.bias)
-
-class cMAF(nn.Module):
-    def __init__(self, input_dim, hidden_dim, condition_dim, n_flows):
-        super().__init__()
-        self.input_dim = input_dim
-        self.condition_dim = condition_dim
-        self.n_flows = n_flows
-
-        # Define the flows
-        self.flows = nn.ModuleList([self._build_flow(input_dim, hidden_dim, condition_dim) for _ in range(n_flows)])
-        self.base_dist = Normal(torch.zeros(input_dim), torch.ones(input_dim))
-
-    def _build_flow(self, input_dim, hidden_dim, condition_dim):
-        mask = torch.tril(torch.ones(input_dim, input_dim), diagonal=-1)
-        
-        return nn.Sequential(
-            ConditionalMaskedLinear(input_dim, hidden_dim, condition_dim, mask),
-            nn.ReLU(),
-            ConditionalMaskedLinear(hidden_dim, hidden_dim, condition_dim, mask),
-            nn.ReLU(),
-            nn.BatchNorm1d(hidden_dim),
-            ConditionalMaskedLinear(hidden_dim, 2 * input_dim, condition_dim, mask)
-        )
-
-    def forward(self, x, cond):
-        log_det_jacobians = 0
-        for flow in self.flows:
-            m, s = flow(x, cond).chunk(2, dim=1)
-            s = torch.tanh(s)  # Stability for scaling
-            x = x * torch.exp(s) + m
-            log_det_jacobians += s.sum(-1)
-        return x, log_det_jacobians
-
-    def loss(self, x: torch.FloatTensor, cond: torch.FloatTensor) -> torch.FloatTensor:
-        z, log_det_jacobians = self.forward(x, cond)
-        log_prob = self.base_dist.log_prob(z).sum(-1)
-        return log_prob + log_det_jacobians
-
-    def sample(self, num_samples: int, cond: torch.FloatTensor) -> torch.FloatTensor:
-        z = self.base_dist.sample((num_samples,))
-        for flow in reversed(self.flows):
-            m, s = flow(z, cond).chunk(2, dim=1)
-            s = torch.tanh(s)
-            z = (z - m) * torch.exp(-s)
-        return z
+from made_backbone import MAF
 
 
-class in_net(nn.Module):
-    def __init__(self, in_dim: int, n_blocks: int, n_nodes: int, cond_dim: int):
+# best performacne with hiddlen+layer = 1, n_nodes = 128
+class RNVP(nn.Module):
+    def __init__(self, in_dim: int, n_blocks: int, n_nodes: int, cond_dim: int,
+                 hidden_layer = 1, batch_norm: bool = True,
+                 activation = 'relu', device = 'cuda'):
         super().__init__()
         self.in_dim = in_dim
         self.n_blocks = n_blocks
         self.n_nodes = n_nodes
         self.cond_dim = cond_dim
-        self.Model = self.model(in_dim, n_blocks, n_nodes, cond_dim)
+        self.batch_norm = batch_norm
+        
+        # setup activation
+        if activation == 'relu':
+            activation_fn = nn.ReLU()
+        elif activation == 'tanh':
+            activation_fn = nn.Tanh()
+        elif activation == 'gelu':
+            activation_fn = nn.GELU()
+        else:
+            raise ValueError('Check activation function.')
+        
+        self.Model = self.model(in_dim, n_blocks, n_nodes, cond_dim, hidden_layer, activation_fn).to(device)
         
         
         
-    def model(self, n_dim: int, n_blocks: int, n_nodes: int, cond_dims: int) -> Ff.SequenceINN:
+    def model(self, n_dim: int, n_blocks: int, n_nodes: int, cond_dims: int, hidden_layer: int,
+              activation_fn: Callable) -> Ff.SequenceINN:
         """
         Constructs the flow model.
 
@@ -90,10 +49,12 @@ class in_net(nn.Module):
             Ff.SequenceINN: The constructed flow model.
         """
         def subnet_fc(dims_in: int, dims_out: int) -> nn.Sequential:
-            return nn.Sequential(nn.Linear(dims_in, n_nodes), nn.ReLU(),
-                                 nn.Linear(n_nodes, n_nodes), nn.ReLU(),
-                                 nn.BatchNorm1d(n_nodes),
-                                 nn.Linear(n_nodes, dims_out))
+            if self.batch_norm:
+                return nn.Sequential([nn.Linear(dims_in, n_nodes), activation_fn,nn.BatchNorm1d(n_nodes)] +
+                                 [(nn.Linear(n_nodes, n_nodes), activation_fn,nn.BatchNorm1d(n_nodes)) for _ in range(hidden_layer-1)] + [nn.Linear(n_nodes, dims_out)])
+            else:
+                return nn.Sequential([nn.Linear(dims_in, n_nodes), activation_fn] +
+                                 [(nn.Linear(n_nodes, n_nodes), activation_fn) for _ in range(hidden_layer-1)] + [nn.Linear(n_nodes, dims_out)])
         
         flow = Ff.SequenceINN(n_dim)
         permute_soft = True if n_dim != 1 else False
@@ -105,10 +66,12 @@ class in_net(nn.Module):
     def forward(self, x, cond):
         return self.Model(x, c=[cond])
     
-    def sample(self, num_samples: int, cond: torch.FloatTensor,
+    @torch.no_grad()
+    def sample(self, num_samples: int, x: torch.FloatTensor,
                device: str = 'cuda') -> torch.FloatTensor:
+        self.Model.eval()
         z = torch.randn(num_samples, self.in_dim).to(device)
-        return self.Model(z, c = [cond.repeat((num_samples,1)).to(device)], rev=True)
+        return self.Model(z, c = [x.repeat((num_samples,1)).to(device)], rev=True)
     
     def loss(self, x: torch.FloatTensor, cond: torch.FloatTensor) -> torch.FloatTensor:
         z, jac = self.Model(x, c=[cond], rev=False)

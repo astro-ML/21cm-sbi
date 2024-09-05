@@ -6,8 +6,6 @@ run*
 *.npz
 *.png
 *.jpg
-convert.py
-train_cnn.py
 *.o*
 *.e*
 *.log
@@ -17,12 +15,15 @@ sbi-logs
 _cache
 !runner.ipynb
 *.npz
-!dataloader.py
 SNLE
 SNPE
-plots
-mptest.py
+*.py
 plots
 nle.py
 npe.py
 ppc.py
+!made_backbone.py
+!models.py
+!utils.py
+!dataloader.py
+!plot.py
