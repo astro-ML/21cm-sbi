@@ -5,7 +5,7 @@ import torch.distributions as D
 import torchvision.transforms as T
 import math
 
-
+# modified version of https://github.com/e-hulten/maf/blob/master/made.py
 
 def create_masks(input_size, hidden_size, n_hidden, input_order='sequential', input_degrees=None):
     # MADE paper sec 4:
@@ -62,7 +62,7 @@ class MaskedLinear(nn.Linear):
     def inverse(self, u, y=None):
         # apply mask
         mu = u * self.mask
-
+        
         # run through model
         s = self.s_net(mu if y is None else torch.cat([y, mu], dim=1))
         t = self.t_net(mu if y is None else torch.cat([y, mu], dim=1))
@@ -143,6 +143,7 @@ class FlowSequential(nn.Sequential):
             sum_log_abs_det_jacobians = sum_log_abs_det_jacobians + log_abs_det_jacobian
         return u, sum_log_abs_det_jacobians
 
+
 # --------------------
 # Models
 # --------------------
@@ -214,44 +215,3 @@ class MADE(nn.Module):
 
 
 
-class MAF(nn.Module):
-    def __init__(self, n_blocks, in_dim, hidden_layer, n_nodes, 
-                 cond_dim=6, activation='relu', input_order='sequential', 
-                 batch_norm=True, device='cuda'):
-        super().__init__()
-        # base distribution for calculation of log prob under the model
-        self.register_buffer('base_dist_mean', torch.zeros(in_dim))
-        self.register_buffer('base_dist_var', torch.ones(in_dim))
-        self.device = device
-        self.cond_dim = cond_dim
-
-        # construct model
-        modules = []
-        self.input_degrees = None
-        for i in range(n_blocks):
-            modules += [MADE(in_dim, n_nodes, hidden_layer, cond_dim, activation, input_order, self.input_degrees)]
-            self.input_degrees = modules[-1].input_degrees.flip(0)
-            modules += batch_norm * [BatchNorm(in_dim)]
-
-        self.net = FlowSequential(*modules).to(device)
-
-    @property
-    def base_dist(self):
-        return D.Normal(self.base_dist_mean, self.base_dist_var)
-
-    def forward(self, x, cond=None):
-        return self.net(x, cond)
-    
-    def inverse(self, x, cond=None):
-        return self.net.inverse(x, cond)
-
-    @torch.no_grad()
-    def sample(self, num_samples, x):
-        self.net.eval()
-        u = self.base_dist.sample((num_samples,)).to(self.device)
-        labels = x.repeat(num_samples,1).to(self.device)
-        return self.net.inverse(u, labels)
-
-    def loss(self, x, cond=None):
-        u, sum_log_abs_det_jacobians = self.forward(x, cond)
-        return - torch.sum(self.base_dist.log_prob(u) + sum_log_abs_det_jacobians, dim=1)
