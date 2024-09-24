@@ -23,7 +23,8 @@ nle.py
 npe.py
 ppc.py
 !made_backbone.py
-!models.py
+!*models.py
+!classifier.py
 !utils.py
 !dataloader.py
 !plot.py
