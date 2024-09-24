@@ -85,6 +85,7 @@ class NSF_AR_Block(nn.Module):
         init.uniform_(self.init_param, - 1 / 2, 1 / 2).to(self.device)
 
     def forward(self, x, cond=None):
+        
         z = torch.zeros_like(x, device=self.device)
         log_det = torch.zeros(z.shape[0],z.shape[1], device=self.device)
         for i in range(self.dim):
@@ -120,6 +121,7 @@ class NSF_AR_Block(nn.Module):
             x[:, i], ld = unconstrained_rational_quadratic_spline(
                 z[:, i], W, H, D, inverse = True, tail_bound = self.B, device = self.device)
             log_det[:,i] = ld
+            
         return x, log_det
     
     
@@ -150,14 +152,10 @@ class NSF_AR(nn.Module):
         return D.Normal(self.base_dist_mean, self.base_dist_var)
 
     def forward(self, x, cond=None):
-        # rescale x to (-B,B)
-        #x -= self.B
         x, logp = self.net(x, cond)
         return x, logp
     
     def inverse(self, x, cond=None):
-        # rescale x to (-B,B)
-        #x -= self.B
         x, logp = self.net.inverse(x, cond)
         return x, logp
 

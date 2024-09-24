@@ -279,7 +279,7 @@ class DataHandler():
         plt.show()
 
     def normalize(self, labels: torch.FloatTensor, images: torch.FloatTensor = None, 
-                  epsilon: float = 1e-2) -> tuple[torch.FloatTensor, ...]:
+                  epsilon: float = 1e-3) -> tuple[torch.FloatTensor, ...]:
         if images is not None:
             #print(f'{images.shape}')
             diff = images.max() - images.min()
@@ -515,9 +515,9 @@ class SBIHandler():
         if plot:      
             plt.plot(np.linspace(0, epochs, len(train_loss_de)), train_loss_de, label='Trainingsloss DE', alpha=0.5)
             plt.plot(np.linspace(0, epochs, len(test_loss_de)), test_loss_de, label='Testloss DE')
-            if self.sum_net:
-                plt.plot(np.linspace(0, epochs, len(train_loss_sn)), np.log(train_loss_sn), label='Trainingsloss SN', alpha=0.5)
-                plt.plot(np.linspace(0, epochs, len(test_loss_sn)), np.log(test_loss_sn), label='Testloss SN')
+            #if self.sum_net:
+                #plt.plot(np.linspace(0, epochs, len(train_loss_sn)), np.log(train_loss_sn), label='Trainingsloss SN', alpha=0.5)
+                #plt.plot(np.linspace(0, epochs, len(test_loss_sn)), np.log(test_loss_sn), label='Testloss SN')
             plt.xlabel("epochs")
             plt.ylabel("loss")
             plt.title("Log loss during training")

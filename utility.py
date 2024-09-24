@@ -10,6 +10,12 @@ from matplotlib import pyplot as plt
 from py21cmfast.outputs import LightCone as lc
 from py21cmfast.plotting import lightcone_sliceplot as lcplt
 import py21cmfast as p21c
+from typing import Any, Dict, Optional
+from torch.distributions import Distribution
+from sbi.inference.posteriors.mcmc_posterior import MCMCPosterior
+from sbi.inference.posteriors.rejection_posterior import RejectionPosterior
+from sbi.inference.potentials.ratio_based_potential import RatioBasedPotential
+from sbi.utils import mcmc_transform
 
 def cutoff_to_z(redshift_cutoff: float, path: str, prefix: str = "") -> None:
     files = fnmatch.filter(os.listdir(path), prefix + "*")
@@ -456,3 +462,83 @@ def chunking(lst, n):
 def cut_z_idx(z, z_cut):
     amidx = np.abs(z - z_cut).argmin()
     return int(len(z) - amidx)
+
+
+
+
+def repeat_rows(x, num_reps):
+    """Each row of tensor `x` is repeated `num_reps` times along leading dimension."""
+    if not (type(num_reps) == int and num_reps > 0):
+        raise TypeError("Number of repetitions must be a positive integer.")
+    shape = x.shape
+    x = x.unsqueeze(1)
+    x = x.expand(shape[0], num_reps, *shape[1:])
+    return merge_leading_dims(x, num_dims=2)
+
+def merge_leading_dims(x, num_dims):
+    """Reshapes the tensor `x` such that the first `num_dims` dimensions are merged to
+    one."""
+    if not (type(num_dims) == int and num_dims > 0):
+        raise TypeError("Number of leading dims must be a positive integer.")
+    if num_dims > x.dim():
+        raise ValueError(
+            "Number of leading dims can't be greater than total number of dims."
+        )
+    new_shape = torch.Size([-1]) + x.shape[num_dims:]
+    return torch.reshape(x, new_shape)
+
+def get_sbi_posterior(
+    ratio_estimator: torch.nn.Module,
+    prior: Optional[Distribution] = None,
+    sample_with: str = "rejection",
+    mcmc_method: str = "slice_np",
+    mcmc_parameters: Dict[str, Any] = {},
+    rejection_sampling_parameters: Dict[str, Any] = {},
+    enable_transform: bool = False,
+):
+    """Try it.
+
+    Args:
+        density_estimator: The density estimator that the posterior is based on.
+            If `None`, use the latest neural density estimator that was trained.
+        prior: Prior distribution.
+        sample_with: Method to use for sampling from the posterior. Must be one of
+            [`mcmc` | `rejection` | `vi`].
+        mcmc_method: Method used for MCMC sampling, one of `slice_np`, `slice`,
+            `hmc`, `nuts`. Currently defaults to `slice_np` for a custom numpy
+            implementation of slice sampling; select `hmc`, `nuts` or `slice` for
+            Pyro-based sampling.
+        vi_method: Method used for VI, one of [`rKL`, `fKL`, `IW`, `alpha`]. Note
+            that some of the methods admit a `mode seeking` property (e.g. rKL)
+            whereas some admit a `mass covering` one (e.g fKL).
+        mcmc_parameters: Additional kwargs passed to `MCMCPosterior`.
+        vi_parameters: Additional kwargs passed to `VIPosterior`.
+        rejection_sampling_parameters: Additional kwargs passed to
+            `RejectionPosterior`.
+    """
+    device = next(ratio_estimator.parameters()).device.type
+    potential_fn = RatioBasedPotential(ratio_estimator, prior, x_o=None, device=device)
+    theta_transform = mcmc_transform(
+        prior, device=device, enable_transform=enable_transform
+    )
+
+    if sample_with == "mcmc":
+        posterior = MCMCPosterior(
+            potential_fn=potential_fn,
+            theta_transform=theta_transform,
+            proposal=prior,
+            method=mcmc_method,
+            device=device,
+            **mcmc_parameters,
+        )
+    elif sample_with == "rejection":
+        posterior = RejectionPosterior(
+            potential_fn=potential_fn,
+            proposal=prior,
+            device=device,
+            **rejection_sampling_parameters,
+        )
+    else:
+        raise NotImplementedError
+
+    return posterior

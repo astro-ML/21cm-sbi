@@ -75,7 +75,9 @@ class RNVP(nn.Module):
                device: str = 'cuda') -> torch.FloatTensor:
         self.Model.eval()
         z = torch.randn(num_samples, self.in_dim).to(device)
-        return self.Model(z, c = [x.repeat((num_samples,1)).to(device)], rev=True)
+        # add rejection sampling TODO
+        samples = self.Model(z, c = [x.repeat((num_samples,1)).to(device)], rev=True)
+        return samples
     
     def loss(self, x: torch.FloatTensor, cond: torch.FloatTensor) -> torch.FloatTensor:
         z, jac = self.Model(x, c=[cond], rev=False)
