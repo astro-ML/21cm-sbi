@@ -1,6 +1,4 @@
-from summary_models import Summary_net_lc_smol, Summary_net_lc_super_smol
-from cl_models import RNVP, NSF_CL
-from ar_models import NSF_AR, MAF
+
 from logging import info, warning, error
 from matplotlib import pyplot as plt
 import os, fnmatch, sys
@@ -17,8 +15,9 @@ from alive_progress import alive_bar
 from utility import *
 from torchvision.transforms import v2
 from plot import pairplot
-from torchsummary import summary
 from scipy.stats import kstest, uniform, gaussian_kde
+from py21cmfast_tools import calculate_ps
+from powerbox.tools import ignore_zero_absk
 
 
 # write additional class for model itself
@@ -200,6 +199,62 @@ class SumnetHandler():
     def load(self, name: str = "model.pt"):
         self.Model.load_state_dict(torch.load(name, map_location=torch.device(self.device), weights_only=True))
         self.Model.eval()
+        
+        
+        
+class RecNetHandler(SumnetHandler):
+    def _init__(self, Model: object, Training_data: object = None, Test_data: object = None, device = "cuda"):
+        super().__init__(Model, Training_data, Test_data, device)
+        
+    def train(self, epochs: int, 
+              optimizer: object, lossf: Callable = nn.MSELoss(),
+              ps_kwargs: dict = {"kernel_size": 10}, plot: bool = True):
+        
+        # currently no ps because metadata like redshift is lost in preprocessing step
+        # post-computation possible but expensive in trainingsloop
+        '''        
+        res = calculate_ps(lc = lightcone.lightcones['brightness_temp'] , 
+                        lc_redshifts=lightcone.lightcone_redshifts, 
+                        box_length=lightcone.user_params.BOX_LEN, 
+                        box_side_shape=lightcone.user_params.HII_DIM,
+                        log_bins=False, zs = self.z_eval, 
+                        calc_1d=True, calc_2d=False,
+                        nbins_1d=self.bins, bin_ave=True, 
+                        k_weights=ignore_zero_absk,postprocess=True)'''
+        
+        def _lossf(x, y):
+            x = torch.mean(x, (0,1))
+            x = nn.MaxPool1d(kernel_size=ps_kwargs['kernel_size'])(x)
+            return lossf(x, y)
+        
+        self._lossf = _lossf
+        
+        return super().train(epochs, optimizer, _lossf, plot)
+    
+    def test_self(self):
+        return SumnetHandler.test(self.TestD, self.Model, self._lossf, plot = False, device=self.device)
+        
+    @staticmethod
+    def test_specific(Validation_data: object, Model: object, lossf: Callable, num_samples: int, device = 'cuda',
+                    denormalize: Callable = (lambda x: x)):
+        Model.to(device)
+        Model.eval()
+        test_idx = np.random.randint(0, len(Validation_data), num_samples)
+        test_loss = []
+        with torch.no_grad():
+            for lab, img, _ in Validation_data:
+                if num_samples > 0:
+                    img, lab = img.to(device), lab.to('cpu')
+                    pred = Model(img).to('cpu')
+                    print(f'loss: ' + str(lossf(denormalize(pred), denormalize(lab)).item()) + '\n',
+                        f'pred: ' + str(denormalize(pred.to('cpu'))) + '\n',
+                        f'truth: ' + str(denormalize(lab.to('cpu'))))
+                    num_samples -= 1
+                else:
+                    break
+        
+        
+                        
 
 
 
@@ -279,7 +334,7 @@ class DataHandler():
         plt.show()
 
     def normalize(self, labels: torch.FloatTensor, images: torch.FloatTensor = None, 
-                  epsilon: float = 1e-3) -> tuple[torch.FloatTensor, ...]:
+                  epsilon: float = 1e-2) -> tuple[torch.FloatTensor, ...]:
         if images is not None:
             #print(f'{images.shape}')
             diff = images.max() - images.min()
@@ -512,14 +567,24 @@ class SBIHandler():
                     test_loss_sn.append(test_loss_sn_tmp)
                     
                 bar()
+                
+        train_loss_de = np.array(train_loss_de)
+        test_loss_de = np.array(test_loss_de)
+        if self.sum_net:
+            train_loss_sn = np.array(train_loss_sn)
+            test_loss_sn = np.array(test_loss_sn)
+                
+        self.summary_net.eval()
+        self.density_estimator.eval()
+        
         if plot:      
             plt.plot(np.linspace(0, epochs, len(train_loss_de)), train_loss_de, label='Trainingsloss DE', alpha=0.5)
             plt.plot(np.linspace(0, epochs, len(test_loss_de)), test_loss_de, label='Testloss DE')
-            #if self.sum_net:
-                #plt.plot(np.linspace(0, epochs, len(train_loss_sn)), np.log(train_loss_sn), label='Trainingsloss SN', alpha=0.5)
-                #plt.plot(np.linspace(0, epochs, len(test_loss_sn)), np.log(test_loss_sn), label='Testloss SN')
+            if self.sum_net:
+                plt.plot(np.linspace(0, epochs, len(train_loss_sn)), np.log(train_loss_sn), label='Trainingsloss SN', alpha=0.5)
+                plt.plot(np.linspace(0, epochs, len(test_loss_sn)), np.log(test_loss_sn), label='Testloss SN')
             plt.xlabel("epochs")
-            plt.ylabel("loss")
+            plt.ylabel("norm loss")
             plt.title("Log loss during training")
             plt.legend()
             plt.savefig("./training_loss.png", dpi=400)
@@ -679,3 +744,191 @@ class SBIHandler():
         # Local Classifier Two-Sample Tests
         
         # sensitivity analysis
+        
+        
+        
+        
+class NLEHandler(SBIHandler):
+    def __init__(self, density_estimator: DensnetHandler, summary_net: SumnetHandler = None,
+                 reconstruction_net: nn.Module = None, 
+                 device = 'cuda'):
+        super().__init__(density_estimator, summary_net, device)
+        if reconstruction_net is None:
+            self.rec_net = False
+        else:
+            self.rec_net = True
+            self.reconstruction_net = reconstruction_net
+
+        
+        info("Succesfully initialized SBIHandler")
+        
+    def train(self, training_data: object, test_data: object, epochs: int = 20, summary_net_freezed_epochs: int = 0, summary_net_pretrain_epochs: int = 0, optimizer = torch.optim.Adam,
+              optimizer_kwargs: dict = {"lr": 1e-4}, loss_function: Callable = torch.nn.MSELoss, loss_params: dict = {}, device: str = None, plot: bool = True,
+              grad_clip: float = 0):
+        
+        if grad_clip > 0:
+            grad_clipping = True
+        else:
+            grad_clipping = False
+            
+        if device is None: 
+            device = self.device
+            info(f"Using device {device}")
+        info("Begin training...")
+        
+        loss_function = loss_function(**loss_params)
+        
+        if self.sum_net:
+            self.summary_net.to(device)
+        if self.rec_net:
+            self.reconstruction_net.to(device)
+        self.density_estimator.to(device)
+        
+        # pretrain summary_net
+        if summary_net_pretrain_epochs > 0:
+            summary_net = SumnetHandler(self.summary_net, training_data, test_data, device)
+            summary_net.train(summary_net_pretrain_epochs, loss_function, optimizer(self.summary_net.parameters(), **optimizer_kwargs))
+            summary_net = summary_net.Model
+        
+        # begin main trainingsloop
+        
+        self.stpe = summary_net_freezed_epochs
+        
+        with alive_bar(epochs, force_tty=True, refresh_secs=5) as bar:
+                        
+            train_loss_de, test_loss_de = [], []
+            if self.sum_net:
+                train_loss_sn, test_loss_sn = [], []
+            
+            
+            # training loop
+            for epoch in range(epochs):
+                
+                # initialize optimizer
+                if self.sum_net and epoch == summary_net_freezed_epochs and not self.rec_net:
+                    self.optimizer = optimizer(list(self.density_estimator.parameters()) + list(self.summary_net.parameters()), **optimizer_kwargs)
+                if self.sum_net and epoch == summary_net_freezed_epochs and self.rec_net:
+                    info("Initialize optimizer for joint training...")
+                    self.optimizer = optimizer(list(self.density_estimator.parameters()) + list(self.summary_net.parameters()) + list(self.reconstruction_net.parameters()), **optimizer_kwargs)
+                if not self.sum_net or ( epoch == 0 and epoch < summary_net_freezed_epochs):
+                    info("Initialize optimizer for density estimator training with freezed summary...")
+                    self.optimizer = optimizer(self.density_estimator.parameters(), **optimizer_kwargs)
+                
+                self.density_estimator.train()
+                if self.sum_net and epoch < summary_net_freezed_epochs:
+                    self.summary_net.eval()
+                else:
+                    self.summary_net.train()
+                
+                    
+                train_loss_de_tmp = 0
+                if self.sum_net:
+                    train_loss_sn_tmp = 0
+                    
+                    
+                for lab, img, _ in training_data:
+                    
+                    img, lab = img.to(device), lab.to(device)
+                    if self.sum_net:
+                        if epoch < summary_net_freezed_epochs:
+                            summary = self.summary_net(img).detach()
+                            train_loss_sn_tmp += loss_function(summary, lab).mean().item()
+                        elif not self.rec_net:
+                            summary = self.summary_net(img)
+                            train_loss_sn_tmp += loss_function(summary, lab).mean().item()
+                        elif self.rec_net:
+                            summary = self.summary_net(img)
+                            reconstruction = self.reconstruction_net(summary)
+                            rec_loss = loss_function(reconstruction, img).mean()
+                    else:
+                        summary = img
+                    if summary.shape != lab.shape:
+                        raise error(f"Summary {summary.shape} and label {lab.shape} shape do not match")                    
+                    # computing loss
+                    
+                    if self.rec_net and epoch >= summary_net_freezed_epochs:
+                        loss = self.density_estimator.loss(summary, cond=lab).mean(0)
+                        loss += rec_loss
+                        train_loss_sn += rec_loss.item()
+                    elif not self.rec_net and self.sum_net and epoch >= summary_net_freezed_epochs:
+                        loss = 0.5*(self.density_estimator.loss(summary, cond=lab).mean(0) + self.density_estimator.loss(lab, cond=summary).mean(0))
+                    else:
+                        loss = self.density_estimator.loss(summary, cond=lab).mean(0)
+
+                    loss.backward()
+                    
+                    # grad clipping
+                    if grad_clipping:
+                        torch.nn.utils.clip_grad_norm_(self.density_estimator.parameters(), grad_clip)
+                        if self.sum_net and epoch >= summary_net_freezed_epochs:
+                            torch.nn.utils.clip_grad_norm_(self.summary_net.parameters(), grad_clip)
+                    
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    
+                    train_loss_de_tmp += loss.item()
+                    
+                # testing loop
+                test_loss_de_tmp, test_loss_sn_tmp = self.test_self(test_data, epoch, loss_function)
+                    
+                train_loss_de.append(train_loss_de_tmp / len(training_data))
+                test_loss_de.append(test_loss_de_tmp)
+                if self.sum_net:
+                    train_loss_sn.append(train_loss_sn_tmp / len(training_data))
+                    test_loss_sn.append(test_loss_sn_tmp)
+                    
+                bar()
+        if self.sum_net: self.summary_net.eval()
+        self.density_estimator.eval()
+        if self.rec_net: self.reconstruction_net.eval()
+        if plot:      
+            plt.plot(np.linspace(0, epochs, len(train_loss_de)), train_loss_de, label='Trainingsloss DE', alpha=0.5)
+            plt.plot(np.linspace(0, epochs, len(test_loss_de)), test_loss_de, label='Testloss DE')
+            if self.sum_net:
+                plt.plot(np.linspace(0, epochs, len(train_loss_sn)), np.log(train_loss_sn), label='Trainingsloss SN', alpha=0.5)
+                plt.plot(np.linspace(0, epochs, len(test_loss_sn)), np.log(test_loss_sn), label='Testloss SN')
+            plt.xlabel("epochs")
+            plt.ylabel("loss")
+            plt.title("Log loss during training")
+            plt.legend()
+            plt.savefig("./training_loss.png", dpi=400)
+            plt.show()
+            plt.clf()
+    
+    @torch.no_grad()   
+    def test_self(self, validation_data: object, epoch: int = 0, loss_function: Callable = torch.nn.MSELoss()):
+        if self.sum_net:
+            self.summary_net.eval()
+        if self.rec_net:
+            self.reconstruction_net.eval()
+        self.density_estimator.eval()
+        test_loss_de_tmp = 0
+        if self.sum_net:
+            test_loss_sn_tmp = 0
+            
+        for lab, img, _  in validation_data:
+            img, lab,  = img.to(self.device), lab.to(self.device)
+            
+            if self.sum_net:
+                if epoch < self.stpe:
+                    summary = self.summary_net(img).detach()
+                    test_loss_sn_tmp += loss_function(summary, lab).mean().item()
+                elif not self.rec_net:
+                    summary = self.summary_net(img)
+                    test_loss_sn_tmp += loss_function(summary, lab).mean().item()
+                elif self.rec_net:
+                    summary = self.summary_net(img)
+                    reconstruction = self.reconstruction_net(summary)
+                    rec_loss = loss_function(reconstruction, img).mean()
+            
+            if self.rec_net and epoch >= self.stpe:
+                loss = self.density_estimator.loss(summary, cond=lab).mean(0)
+                loss += rec_loss
+                test_loss_sn += rec_loss.item()
+            elif not self.rec_net and self.sum_net and epoch >= self.stpe:
+                loss = 0.5*(self.density_estimator.loss(summary, cond=lab).mean(0) + self.density_estimator.loss(lab, cond=summary).mean(0))
+            else:
+                loss = self.density_estimator.loss(summary, cond=lab).mean(0)
+            
+            test_loss_de_tmp += loss.item() 
+        return test_loss_de_tmp / len(validation_data), test_loss_sn_tmp / len(validation_data)

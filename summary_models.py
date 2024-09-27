@@ -202,6 +202,40 @@ class Summary_net_lc_super_smol(nn.Module):
         x = self.fc_layers(x)
         return x
 
+# out_dim is a bit clunky, better option will be added soon
+class global_temp_smol_inv(nn.Module):
+    def __init__(self, in_dim = 6, out_dim = 60):
+        super().__init__()
+        self.fc_layers = nn.Sequential(
+            nn.Linear(in_dim, 32),
+            nn.GELU(),
+            nn.Linear(32, 64),
+            nn.GELU(),
+            nn.Linear(64, 96),
+            nn.GELU(),
+        )
+        self.unpooling = nn.Sequential(
+            nn.Conv1d(in_channels=1, out_channels=32, kernel_size=3, stride=1),
+            nn.GELU(),
+            nn.BatchNorm3d(32),
+            nn.Conv1d(in_channels=32, out_channels=48, kernel_size=3, stride=1),
+            nn.GELU(),
+            nn.BatchNorm3d(48),
+            nn.Conv1d(in_channels=48, out_channels=32, kernel_size=3, stride=1),
+            nn.GELU(),
+            nn.BatchNorm3d(32),
+            nn.Conv1d(in_channels=32, out_channels=1, kernel_size=3, stride =1),
+            nn.GELU(),
+        )
+        self.out = nn.Linear(32, out_dim)
+
+    def forward(self, x):
+        x = self.fc_layers(x)
+        x = x.unsqueeze(-2)
+        x = x.squeeze(-2)
+        x = self.out(x)
+        return x
+
 class Summary_net_lc_super_smol_inv(nn.Module):
     def __init__(self):
         super().__init__()

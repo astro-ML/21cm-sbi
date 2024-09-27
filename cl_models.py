@@ -6,6 +6,10 @@ from typing import Callable, List, Tuple
 import torch.nn.functional as F
 from summary_models import FCNN
 import numpy as np
+from typing import Dict, Any
+from utility import get_nle_posterior
+from sbi.utils import BoxUniform
+
 DEFAULT_MIN_BIN_WIDTH = 1e-3
 DEFAULT_MIN_BIN_HEIGHT = 1e-3
 DEFAULT_MIN_DERIVATIVE = 1e-3
@@ -14,15 +18,17 @@ DEFAULT_MIN_DERIVATIVE = 1e-3
 
 # best performacne with hiddlen+layer = 1, n_nodes = 128
 class RNVP(nn.Module):
-    def __init__(self, in_dim: int, n_blocks: int, n_nodes: int, cond_dim: int,
-                 hidden_layer = 1, batch_norm: bool = True,
-                 activation = 'relu', device = 'cuda'):
+    def __init__(self, in_dim: int, n_blocks: int, n_nodes: int, cond_dim: int = 6,
+                 hidden_layer = 1, batch_norm: bool = True, 
+                 activation = 'relu', reversed = False, device = 'cuda'):
         super().__init__()
         self.in_dim = in_dim
         self.n_blocks = n_blocks
         self.n_nodes = n_nodes
         self.cond_dim = cond_dim
         self.batch_norm = batch_norm
+        self.reversed = reversed
+        self.device = device
         
         # setup activation
         if activation == 'relu':
@@ -34,9 +40,10 @@ class RNVP(nn.Module):
         else:
             raise ValueError('Check activation function.')
         
-        self.Model = self.model(in_dim, n_blocks, n_nodes, cond_dim, hidden_layer, activation_fn).to(device)
+        self.net = self.model(in_dim, n_blocks, n_nodes, cond_dim, hidden_layer, activation_fn).to(device)
         
-        
+        # Hack in prior, bettert oslution TBA
+        self.prior = BoxUniform(low=torch.zeros(in_dim), high=torch.ones(in_dim), device=device)
         
     def model(self, n_dim: int, n_blocks: int, n_nodes: int, cond_dims: int, hidden_layer: int,
               activation_fn: Callable) -> Ff.SequenceINN:
@@ -53,12 +60,17 @@ class RNVP(nn.Module):
             Ff.SequenceINN: The constructed flow model.
         """
         def subnet_fc(dims_in: int, dims_out: int) -> nn.Sequential:
+            layers = []
             if self.batch_norm:
-                layers = [nn.Linear(dims_in, n_nodes), activation_fn,nn.BatchNorm1d(n_nodes)] +[layer for _ in range(hidden_layer-1) for layer in (nn.Linear(n_nodes, n_nodes), activation_fn, nn.BatchNorm1d(n_nodes))] + [nn.Linear(n_nodes, dims_out)]
-                return nn.Sequential(*layers)
+                layers += [nn.Linear(dims_in, n_nodes), activation_fn, nn.BatchNorm1d(n_nodes)]
+                for _ in range(hidden_layer-1):
+                    layers += [nn.Linear(n_nodes, n_nodes), activation_fn, nn.BatchNorm1d(n_nodes)]
             else:
-                layers = [nn.Linear(dims_in, n_nodes), activation_fn] + [layer for _ in range(hidden_layer-1) for layer in (nn.Linear(n_nodes, n_nodes), activation_fn)] + [nn.Linear(n_nodes, dims_out)]
-                return nn.Sequential(*layers)
+                layers += [nn.Linear(dims_in, n_nodes), activation_fn]
+                for _ in range(hidden_layer-1):
+                    layers += [nn.Linear(n_nodes, n_nodes), activation_fn]
+            layers += [nn.Linear(n_nodes, dims_out)]
+            return nn.Sequential(*layers)
         
         flow = Ff.SequenceINN(n_dim)
         permute_soft = True if n_dim != 1 else False
@@ -68,19 +80,59 @@ class RNVP(nn.Module):
         return flow
     
     def forward(self, x, cond):
-        return self.Model(x, c=[cond])
+        return self.net(x, c=[cond])
     
-    @torch.no_grad()
-    def sample(self, num_samples: int, x: torch.FloatTensor,
-               device: str = 'cuda') -> torch.FloatTensor:
-        self.Model.eval()
-        z = torch.randn(num_samples, self.in_dim).to(device)
-        # add rejection sampling TODO
-        samples = self.Model(z, c = [x.repeat((num_samples,1)).to(device)], rev=True)
+    def log_prob(self, x, condition=None):
+        xshape = x.shape
+        if len(xshape) > 2:
+            x = x.reshape(xshape[0] * xshape[1], xshape[2])
+        elif len(xshape) > 3:
+            raise ValueError(f"Shape of x is {x.shape} but is expected to be (sample_shape, batch_shape, event_shape) or (batch_shape, event_shape)") 
+        # only there to handle weird sbi package stuff
+        
+        z, jac = self.net(x, c=[condition], rev=False)
+        p = 0.5*torch.sum(z**2,1) - jac
+        
+        if len(xshape) > 2:
+            p = p.reshape(xshape[0], xshape[1])
+        
+        p = p / self.in_dim
+
+        return - p
+    
+    def sample(self, num_samples, x, **kwargs):
+        self.net.eval()
+        if self.reversed:
+            return self.rev_sample(num_samples, x, **kwargs)
+        else:
+            z = torch.randn(num_samples, self.in_dim).to(self.device)
+            # add rejection sampling TODO
+            samples,_ = self.net(z, c = [x.repeat((num_samples,1)).to(self.device)], rev=True)
+            return samples
+    
+    def rev_sample(self,
+    num_samples: int,
+    x: torch.Tensor,
+    sample_with: str = "rejection",
+    mcmc_method: str = "slice_np",
+    mcmc_parameters: Dict[str, Any] = {},
+    rejection_sampling_parameters: Dict[str, Any] = {},
+    enable_transform: bool = False,
+    device = 'cuda',):
+        posterior = get_nle_posterior(
+            likelihood_estimator=self.to(device),
+            prior=self.prior,
+            sample_with=sample_with,
+            mcmc_method=mcmc_method,
+            mcmc_parameters=mcmc_parameters,
+            rejection_sampling_parameters=rejection_sampling_parameters,
+            enable_transform=enable_transform,
+        )
+        samples = posterior.sample((num_samples,), x=x.to(device))
         return samples
     
     def loss(self, x: torch.FloatTensor, cond: torch.FloatTensor) -> torch.FloatTensor:
-        z, jac = self.Model(x, c=[cond], rev=False)
+        z, jac = self.net(x, c=[cond], rev=False)
         loss = 0.5*torch.sum(z**2,1) - jac
         loss = loss.mean() / self.in_dim
         return loss
