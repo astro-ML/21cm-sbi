@@ -81,23 +81,22 @@ class DensnetHandler():
         self.Model.eval()
 
 class SumnetHandler():
-    def __init__(self, Model: object, Training_data: object = None, Test_data: object = None, device = "cuda"):
+    def __init__(self, Model: object, device = "cuda"):
         self.Model = Model().to(device)
-        self.TrainingD = Training_data
-        self.TestD = Test_data
         self.device = device
     
-    def train(self, epochs: int, 
-              optimizer: object, lossf: Callable = nn.MSELoss(), plot: bool = True):
+    def train(self, epochs: int,  Training_data: object, Test_data: object,
+              optimizer: object, optimizer_kwargs: dict = {},
+            lossf: Callable = nn.MSELoss(), plot: bool = True):
         self.lossf = lossf
-        self.optimizer = optimizer
+        self.optimizer = optimizer(**optimizer_kwargs)
 
         losstrain = []
         losstest = []
         with alive_bar(epochs, force_tty=True, refresh_secs=5) as bbar:
             for epoch in range(epochs):
                 self.Model.train()
-                for lab, img, _ in self.TrainingD:
+                for lab, img, _ in Training_data:
 
                     img, lab = img.to(self.device), lab.to(self.device)
 
@@ -108,7 +107,7 @@ class SumnetHandler():
                     self.optimizer.step()
                     self.optimizer.zero_grad()
                     losstrain.append(loss.item())
-                losstest.append(self.test_self())
+                losstest.append(self.test_self(Test_data))
                 bbar()
         if plot:
             plt.plot(np.linspace(0, epochs, len(losstrain)), losstrain, label='Trainingsloss', alpha=0.5)
@@ -122,8 +121,8 @@ class SumnetHandler():
             plt.show()
             plt.clf()
 
-    def test_self(self):
-        return SumnetHandler.test(self.TestD, self.Model, self.lossf, plot = False, device=self.device)
+    def test_self(self, TestD):
+        return SumnetHandler.test(TestD, self.Model, self.lossf, plot = False, device=self.device)
 
     @staticmethod
     def test(Validation_data: object, Model: object, lossf: Callable, plot: bool = True, device = 'cuda',
@@ -203,11 +202,11 @@ class SumnetHandler():
         
         
 class RecNetHandler(SumnetHandler):
-    def _init__(self, Model: object, Training_data: object = None, Test_data: object = None, device = "cuda"):
+    def _init__(self, Model: object, device = "cuda"):
         super().__init__(Model, Training_data, Test_data, device)
         
-    def train(self, epochs: int, 
-              optimizer: object, lossf: Callable = nn.MSELoss(),
+    def train(self, epochs: int, training_data: object, test_data: object,
+              optimizer: object, optimizer_kwargs: dict = {}, lossf: Callable = nn.MSELoss(),
               ps_kwargs: dict = {"kernel_size": 10}, plot: bool = True):
         
         # currently no ps because metadata like redshift is lost in preprocessing step
@@ -229,7 +228,12 @@ class RecNetHandler(SumnetHandler):
         
         self._lossf = _lossf
         
-        return super().train(epochs, optimizer, _lossf, plot)
+        return super().train(epochs = epochs,
+        training_data = training_data,
+        test_data = test_data, 
+        optimizer = optimizer,
+        optimizer_kwargs = optimizer_kwargs,
+        lossf = _lossf, plot = plot)
     
     def test_self(self):
         return SumnetHandler.test(self.TestD, self.Model, self._lossf, plot = False, device=self.device)
