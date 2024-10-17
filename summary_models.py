@@ -204,38 +204,50 @@ class Summary_net_lc_super_smol(nn.Module):
 
 # out_dim is a bit clunky, better option will be added soon
 # in: (batch_dim, event_dim) ; out: (batch_dim, event_dim)
-class global_temp_smol_inv(nn.Module):
-    def __init__(self, in_dim = 6, out_dim = 60):
+class global_temp_smol_inv_super_smol(nn.Module):
+    def __init__(self, in_dim = 6, out_dim = 470):
         super().__init__()
         self.fc_layers = nn.Sequential(
-            nn.Linear(in_dim, 32),
+            nn.Linear(in_dim, 12),
             nn.GELU(),
-            nn.Linear(32, 64),
+            nn.Linear(12, 24),
             nn.GELU(),
-            nn.Linear(64, 96),
+            nn.Linear(24, 48),
             nn.GELU(),
         )
         self.unpooling = nn.Sequential(
-            nn.Conv1d(in_channels=1, out_channels=32, kernel_size=3, stride=1, padding=1),
+            nn.Conv1d(in_channels=1, out_channels=8, kernel_size=3, stride=1, padding=1),
             nn.GELU(),
-            nn.BatchNorm1d(32),
-            nn.Conv1d(in_channels=32, out_channels=48, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm1d(8),
+            nn.Upsample(size = 100, mode='linear'),
+            nn.Conv1d(in_channels=8, out_channels=8, kernel_size=11, stride=1, padding=5),
             nn.GELU(),
-            nn.BatchNorm1d(48),
-            nn.Conv1d(in_channels=48, out_channels=32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm1d(8),
+            nn.Upsample(size = 200, mode='linear'),
+            nn.Conv1d(in_channels=8, out_channels=16, kernel_size=21, stride=1, padding=10),
             nn.GELU(),
-            nn.BatchNorm1d(32),
-            nn.Conv1d(in_channels=32, out_channels=1, kernel_size=3, stride =1, padding=1),
+            nn.BatchNorm1d(16),
+            nn.Upsample(size = 350, mode='linear'),
+            nn.Conv1d(in_channels=16, out_channels=24, kernel_size=21, stride=1, padding=10),
+            nn.GELU(),
+            nn.BatchNorm1d(24),
+            nn.Upsample(size = 470, mode='linear'),
+            nn.Conv1d(in_channels=24, out_channels=16, kernel_size=11, stride=1, padding=5),
+            nn.GELU(),
+            nn.BatchNorm1d(16),
+            nn.Conv1d(in_channels=16, out_channels=1, kernel_size=5, stride=1, padding=2),
             nn.GELU(),
         )
-        self.out = nn.Linear(96, out_dim)
+        self.out = nn.Sequential(
+            nn.Conv1d(in_channels=1, out_channels=1, kernel_size=1, stride =1, padding=0),
+        )
 
     def forward(self, x):
         x = self.fc_layers(x)
         x = x.unsqueeze(-2)
         x = self.unpooling(x)
-        x = x.squeeze(-2)
         x = self.out(x)
+        x = x.squeeze(-2)
         return x
 
 class Summary_net_lc_super_smol_inv(nn.Module):

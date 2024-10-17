@@ -447,7 +447,6 @@ def convert_npz_to_pt(path: str, prefix: str = "run_", check_for_nan: bool = Tru
             ax[2].hist(x = avg_bt, bins = 10)
             ax[2].set_xlabel("avg" + r"$ \delta T$")
             
-            fig.tight_layout()
             fig.savefig("./convert_results.png", dpi=200)
             fig.show()
             print(len(zeros), " brightness_temps are zero at pos:\n", zeros)

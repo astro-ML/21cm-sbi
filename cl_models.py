@@ -19,7 +19,7 @@ DEFAULT_MIN_DERIVATIVE = 1e-3
 # best performacne with hiddlen+layer = 1, n_nodes = 128
 class RNVP(nn.Module):
     def __init__(self, in_dim: int, n_blocks: int, n_nodes: int, cond_dim: int = 6,
-                 hidden_layer = 1, batch_norm: bool = True, 
+                 hidden_layer = 1, batch_norm: bool = False, 
                  activation = 'relu', reversed = False, device = 'cuda'):
         super().__init__()
         self.in_dim = in_dim
@@ -47,18 +47,19 @@ class RNVP(nn.Module):
         
     def model(self, n_dim: int, n_blocks: int, n_nodes: int, cond_dims: int, hidden_layer: int,
               activation_fn: Callable) -> Ff.SequenceINN:
+        
         """
-        Constructs the flow model.
+            Constructs the flow model.
+            Batchnorm seeems to worsen the performance by a huge margin, keep it deactivated.
+            (Probably broken because of how conditioning is done in the high-level network builder)
 
         Args:
             n_dim (int): The dimensionality of the input.
             n_blocks (int): The number of blocks in the model.
             n_nodes (int): The number of nodes in the subnet.
-            cond_dims (tuple): The dimensions of the conditional input.
 
-        Returns:
-            Ff.SequenceINN: The constructed flow model.
         """
+
         def subnet_fc(dims_in: int, dims_out: int) -> nn.Sequential:
             layers = []
             if self.batch_norm:

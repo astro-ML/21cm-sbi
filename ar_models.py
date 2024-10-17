@@ -182,6 +182,7 @@ class NSF_AR(nn.Module):
         
         if len(xshape) > 2:
             p = p.reshape(xshape[0], xshape[1], xshape[2])
+            s = s.reshape(xshape[0], xshape[1], xshape[2])
             
         p = p.sum(-1) + self.base_dist.log_prob(s).sum(-1)
 
@@ -267,11 +268,12 @@ class MAF(nn.Module):
         elif len(xshape) > 3:
             raise ValueError(f"Shape of x is {x.shape} but is expected to be (sample_shape, batch_shape, event_shape) or (batch_shape, event_shape)") 
         # only there to handle weird sbi package stuff
-        
-        s, p = self.forward(x, condition)
+        print(x.shape, condition.shape)
+        s, p = self.inverse(x, condition)
         
         if len(xshape) > 2:
             p = p.reshape(xshape[0], xshape[1], xshape[2])
+            s = s.reshape(xshape[0], xshape[1], xshape[2])
             
         p = p.sum(-1) + self.base_dist.log_prob(s).sum(-1)
 
@@ -309,4 +311,5 @@ class MAF(nn.Module):
 
     def loss(self, x, cond=None):
         u, sum_log_abs_det_jacobians = self.forward(x, cond)
-        return - torch.sum(self.base_dist.log_prob(u) + sum_log_abs_det_jacobians, dim=1)
+        print("base_dist: ", self.base_dist.log_prob(u).mean().item(), "jac: ", sum_log_abs_det_jacobians.mean().detach().item())
+        return - torch.sum(self.base_dist.log_prob(u) + sum_log_abs_det_jacobians, dim=1), u
