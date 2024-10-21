@@ -335,6 +335,52 @@ class Summary_net_lc_benedikt(nn.Module):
 
         return x
 
+class Summary_net_1dps(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear_conv_stack = nn.Sequential(
+            nn.Conv1d(10, 16, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool1d(2),
+            nn.Conv1d(16, 32, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool1d(2),
+            nn.Conv1d(32, 48, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool1d(2),
+        )
+        self.flatten = nn.Flatten()
+        """
+        self.linear_conv_stack_z = nn.Sequential(
+            nn.Conv1d(1, 4, 3, 1),
+            nn.ReLU(),
+            nn.MaxPool1d(2),
+            nn.Conv1d(4, 8, 3, 1),
+            nn.ReLU(),
+            nn.MaxPool1d(2),
+            nn.Conv1d(4, 8, 3, 1),
+            nn.ReLU(),
+            nn.MaxPool1d(2),
+        )
+        """
+        self.linear_stack = nn.Sequential(
+            nn.Linear(48,32),
+            nn.ReLU(),
+            nn.Linear(32,16),
+            nn.ReLU(),
+            nn.Linear(16,6),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        print(x.shape)
+        x = self.linear_conv_stack(x)
+        print(x.shape)
+        x = self.flatten(x)
+        print(x.shape)
+        x = self.linear_stack(x)
+        print(x.shape)
+        return x
 
 class Summary_net_2dps(nn.Module):
     def __init__(self):

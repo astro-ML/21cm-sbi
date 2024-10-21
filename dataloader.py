@@ -18,6 +18,7 @@ from plot import pairplot
 from scipy.stats import kstest, uniform, gaussian_kde
 from py21cmfast_tools import calculate_ps
 from powerbox.tools import ignore_zero_absk
+from py21cmfast_tools import calculate_ps
 
 
 # write additional class for model itself
@@ -522,6 +523,13 @@ class Transpose(torch.nn.Module):
         
 class SBIHandler():
     def __init__(self, density_estimator: DensnetHandler, summary_net: SumnetHandler = None,
+                 summary_statistics = 'none', 
+                 summary_statistics_parameters = {
+                    "BOX_LEN": 200,
+                    "HII_DIM": 40,
+                    "z-eval": np.linspace(7, 24, 10),
+                    "bins": 8,
+                    },
                  device = 'cuda'):
         self.density_estimator = density_estimator
         if summary_net is None:
@@ -531,6 +539,67 @@ class SBIHandler():
             self.summary_net = summary_net
         self.summary_net = summary_net
         self.device = device
+        if summary_statistics != 'none':
+            if summary_statistics == '1dps':
+                def sum_stat(self, brightness_temp, labels):
+                    WDM,OMm,LX,E0,Tvir,Zeta = labels
+                    global_params = {"M_WDM": WDM}
+                    cosmo_params = {"OMm": OMm}
+                    astro_params = {
+                        "L_X": LX,
+                        "NU_X_THRESH": E0,
+                        "ION_Tvir_MIN": Tvir,
+                        "HII_EFF_FACTOR": Zeta,
+                    }
+                    
+                    lc = p21c.LightCone(redshift=5.5, 
+                    cosmo_params=cosmo_params,
+                    astro_params=astro_params,
+                    _globals=global_params,
+                    lightcones={"brightness_temp":brightness_temp},
+                    current_redshift=35.05)
+
+
+                    res = calculate_ps(lc=lc.lightcones['brightness_temp'], lc_redshifts=lc.lightcone_redshifts, 
+                       box_length=summary_statistics_parameters['BOX_LEN'], box_side_shape=summary_statistics_parameters["HII_DIM"],
+                       log_bins=False, zs=summary_statistics_parameters["z-eval"], calc_1d=True, calc_2d=False, 
+                       nbins_1d=summary_statistics_parameters["bins"], bin_ave=True, 
+                       k_weights=ignore_zero_absk, postprocess=True)
+                    return res['ps_1D']
+            elif summary_statistics == '2dps':
+                def sum_stat(self, brightness_temp, labels):
+                    WDM,OMm,LX,E0,Tvir,Zeta = labels
+                    global_params = {"M_WDM": WDM}
+                    cosmo_params = {"OMm": OMm}
+                    astro_params = {
+                        "L_X": LX,
+                        "NU_X_THRESH": E0,
+                        "ION_Tvir_MIN": Tvir,
+                        "HII_EFF_FACTOR": Zeta,
+                    }
+                    
+                    lc = p21c.LightCone(redshift=5.5, 
+                    cosmo_params=cosmo_params,
+                    astro_params=astro_params,
+                    _globals=global_params,
+                    lightcones={"brightness_temp":brightness_temp},
+                    current_redshift=35.05)
+
+
+                    res = calculate_ps(lc=lc.lightcones['brightness_temp'], lc_redshifts=lc.lightcone_redshifts, 
+                       box_length=summary_statistics_parameters['BOX_LEN'], box_side_shape=summary_statistics_parameters["HII_DIM"],
+                       log_bins=False, zs=summary_statistics_parameters["z-eval"], calc_1d=False, calc_2d=True, 
+                       kpar_bins=summary_statistics_parameters["bins"], nbins=summary_statistics_parameters["bins"], bin_ave=True, 
+                       k_weights=ignore_zero_absk, postprocess=True)
+                    return res['final_ps_2D']
+            else: 
+                error("Summary statistics ", summary_statistics, " not defined.")
+        else:
+            self.sum_stat = (lambda x,y: x)
+
+
+
+            
         
         info("Succesfully initialized SBIHandler")
         
@@ -596,20 +665,13 @@ class SBIHandler():
                 for lab, img, _ in training_data:
                     
                     img, lab = img.to(device), lab.to(device)
-                    if self.sum_net:
-                        if epoch < freezed_epochs:
-                            summary = self.summary_net(img).detach()
-                        else:
-                            summary = self.summary_net(img)
-                        train_loss_sn_tmp += loss_function(summary, lab).mean().item()
-                        
-                    else:
-                        summary = img
-                    if summary.shape != lab.shape:
-                        raise error(f"Summary {summary.shape} and label {lab.shape} shape do not match")                    
-                    # computing loss
+
+                    img = self.sum_stat(img, lab)
+
+                    loss, _train_loss_sn = _loss(img, lab, epoch, freezed_epochs)
+
+                    train_loss_de_tmp += _train_loss_sn
                     
-                    loss = self.density_estimator.loss(lab, cond=summary).mean(0)
                     loss.backward()
                     
                     # grad clipping
@@ -666,14 +728,10 @@ class SBIHandler():
         if self.sum_net:
             test_loss_sn_tmp = 0
         for lab, img, _  in validation_data:
-            img, lab,  = img.to(self.device), lab.to(self.device)
-            if self.sum_net:
-                summary = self.summary_net(img)
-                test_loss_sn_tmp += loss_function(summary, lab).mean().item()
-            else:  
-                summary = img
-            loss = self.density_estimator.loss(lab, cond=summary).mean()
-            test_loss_de_tmp += loss.item() 
+            img = self.sum_stat(img, lab)
+            loss, _test_loss_sn = _loss(img, lab, 0, 0 if self.sum_net else 1)
+            test_loss_sn_tmp += _test_loss_sn
+            test_loss_de_tmp += loss.mean().item() 
         return test_loss_de_tmp / len(validation_data), test_loss_sn_tmp / len(validation_data)
 
 
@@ -716,6 +774,26 @@ class SBIHandler():
                 upper = 'hist', lower = 'contour', diag = 'kde')
             if plotname != "": figure.savefig(f"{plotname}_{i}.png", dpi=300)
             figure.show()
+
+    def _loss(self, img, lab, epoch, freezed_epochs):
+        if self.sum_net:
+            if epoch < freezed_epochs:
+                summary = self.summary_net(img).detach()
+                train_loss_sn_tmp = loss_function(summary, lab).mean().item()
+            else:
+                summary = self.summary_net(img)
+                train_loss_sn_tmp = 0
+            
+            
+        else:
+            summary = img
+
+        if summary.shape != lab.shape:
+            raise error(f"Summary {summary.shape} and label {lab.shape} shape do not match")                    
+        # computing loss
+        loss = self.density_estimator.loss(lab, cond=summary).mean(0)
+
+        return loss, train_loss_sn_tmp
     
     @torch.no_grad()
     def run_sbc(self, Validation_Dataset = None, num_samples: int = 1000, num_workers: int = 1,
