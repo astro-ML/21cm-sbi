@@ -339,8 +339,8 @@ def convert_pt_to_2dps(path: str, prefix: str = "", debug: bool = False,
             ps2d = res['final_ps_2D']
 
             new_format = {
-                "images": ps2d,
-                "labels": lab,
+                "images": torch.as_tensor(ps2d),
+                "labels": torch.as_tensor(lab),
                 #"taus": taus,
                 #"zs": zs,
                 #"gxHs": gxHs
@@ -411,8 +411,8 @@ def convert_pt_to_1dps(path: str, prefix: str = "", debug: bool = False,
             ps1d = res['ps_1D']
 
             new_format = {
-                "images": ps1d,
-                "labels": lab,
+                "images": torch.as_tensor(ps1d),
+                "labels": torch.as_tensor(lab),
                 #"taus": taus,
                 #"zs": zs,
                 #"gxHs": gxHs
