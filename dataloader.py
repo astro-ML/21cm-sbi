@@ -18,7 +18,6 @@ from plot import pairplot
 from scipy.stats import kstest, uniform, gaussian_kde
 from py21cmfast_tools import calculate_ps
 from powerbox.tools import ignore_zero_absk
-from py21cmfast_tools import calculate_ps
 
 
 # write additional class for model itself
@@ -523,13 +522,6 @@ class Transpose(torch.nn.Module):
         
 class SBIHandler():
     def __init__(self, density_estimator: DensnetHandler, summary_net: SumnetHandler = None,
-                 summary_statistics = '1dps', 
-                 summary_statistics_parameters = {
-                    "BOX_LEN": 200,
-                    "HII_DIM": 40,
-                    "z-eval": np.linspace(7, 24, 10),
-                    "bins": 8,
-                    },
                  device = 'cuda'):
         self.density_estimator = density_estimator
         if summary_net is None:
@@ -605,9 +597,7 @@ class SBIHandler():
                     
                     img, lab = img.to(device), lab.to(device)
 
-                    img = self.sum_stat(img, lab)
-
-                    loss, _train_loss_sn = self.sum_stat(img, lab, epoch, freezed_epochs)
+                    loss, _train_loss_sn = self._loss(img, lab, epoch, freezed_epochs)
 
                     train_loss_de_tmp += _train_loss_sn
                     
@@ -720,7 +710,7 @@ class SBIHandler():
                 summary = self.summary_net(img).detach()
                 train_loss_sn_tmp = loss_function(summary, lab).mean().item()
             else:
-                summary = self.sum_stat(self.summary_net(img))
+                summary = self.summary_net(img)
                 train_loss_sn_tmp = 0
             
             

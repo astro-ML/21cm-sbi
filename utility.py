@@ -281,7 +281,7 @@ def plot_random(num: int = 5, path: str = "./", prefix: str = "run_") -> None:
 def convert_pt_to_2dps(path: str, prefix: str = "", debug: bool = False,
                     summary_statistics_parameters = {
                     "BOX_LEN": 200,
-                    "HII_DIM": 40,
+                    "HII_DIM": 28,
                     "z-eval": np.linspace(7, 24, 10),
                     "bins": 8,
                     },) -> None:
@@ -353,7 +353,7 @@ def convert_pt_to_2dps(path: str, prefix: str = "", debug: bool = False,
 def convert_pt_to_1dps(path: str, prefix: str = "", debug: bool = False,
                     summary_statistics_parameters = {
                     "BOX_LEN": 200,
-                    "HII_DIM": 40,
+                    "HII_DIM": 28,
                     "z-eval": np.linspace(7, 24, 10),
                     "bins": 8,
                     },) -> None:
