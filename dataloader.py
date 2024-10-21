@@ -523,7 +523,7 @@ class Transpose(torch.nn.Module):
         
 class SBIHandler():
     def __init__(self, density_estimator: DensnetHandler, summary_net: SumnetHandler = None,
-                 summary_statistics = 'none', 
+                 summary_statistics = '1dps', 
                  summary_statistics_parameters = {
                     "BOX_LEN": 200,
                     "HII_DIM": 40,
@@ -539,70 +539,9 @@ class SBIHandler():
             self.summary_net = summary_net
         self.summary_net = summary_net
         self.device = device
-        if summary_statistics != 'none':
-            if summary_statistics == '1dps':
-                def sum_stat(self, brightness_temp, labels):
-                    WDM,OMm,LX,E0,Tvir,Zeta = labels
-                    global_params = {"M_WDM": WDM}
-                    cosmo_params = {"OMm": OMm}
-                    astro_params = {
-                        "L_X": LX,
-                        "NU_X_THRESH": E0,
-                        "ION_Tvir_MIN": Tvir,
-                        "HII_EFF_FACTOR": Zeta,
-                    }
-                    
-                    lc = p21c.LightCone(redshift=5.5, 
-                    cosmo_params=cosmo_params,
-                    astro_params=astro_params,
-                    _globals=global_params,
-                    lightcones={"brightness_temp":brightness_temp},
-                    current_redshift=35.05)
-
-
-                    res = calculate_ps(lc=lc.lightcones['brightness_temp'], lc_redshifts=lc.lightcone_redshifts, 
-                       box_length=summary_statistics_parameters['BOX_LEN'], box_side_shape=summary_statistics_parameters["HII_DIM"],
-                       log_bins=False, zs=summary_statistics_parameters["z-eval"], calc_1d=True, calc_2d=False, 
-                       nbins_1d=summary_statistics_parameters["bins"], bin_ave=True, 
-                       k_weights=ignore_zero_absk, postprocess=True)
-                    return res['ps_1D']
-            elif summary_statistics == '2dps':
-                def sum_stat(self, brightness_temp, labels):
-                    WDM,OMm,LX,E0,Tvir,Zeta = labels
-                    global_params = {"M_WDM": WDM}
-                    cosmo_params = {"OMm": OMm}
-                    astro_params = {
-                        "L_X": LX,
-                        "NU_X_THRESH": E0,
-                        "ION_Tvir_MIN": Tvir,
-                        "HII_EFF_FACTOR": Zeta,
-                    }
-                    
-                    lc = p21c.LightCone(redshift=5.5, 
-                    cosmo_params=cosmo_params,
-                    astro_params=astro_params,
-                    _globals=global_params,
-                    lightcones={"brightness_temp":brightness_temp},
-                    current_redshift=35.05)
-
-
-                    res = calculate_ps(lc=lc.lightcones['brightness_temp'], lc_redshifts=lc.lightcone_redshifts, 
-                       box_length=summary_statistics_parameters['BOX_LEN'], box_side_shape=summary_statistics_parameters["HII_DIM"],
-                       log_bins=False, zs=summary_statistics_parameters["z-eval"], calc_1d=False, calc_2d=True, 
-                       kpar_bins=summary_statistics_parameters["bins"], nbins=summary_statistics_parameters["bins"], bin_ave=True, 
-                       k_weights=ignore_zero_absk, postprocess=True)
-                    return res['final_ps_2D']
-            else: 
-                error("Summary statistics ", summary_statistics, " not defined.")
-        else:
-            self.sum_stat = (lambda x,y: x)
-
-
-
-            
         
         info("Succesfully initialized SBIHandler")
-        
+
     def train(self, training_data: object, test_data: object, epochs: int = 20, freezed_epochs: int = 0, pretrain_epochs: int = 0, optimizer = torch.optim.Adam,
               optimizer_kwargs: dict = {"lr": 1e-4}, loss_function: Callable = torch.nn.MSELoss, loss_params: dict = {}, device: str = None, plot: bool = True,
               grad_clip: float = 0):
@@ -668,7 +607,7 @@ class SBIHandler():
 
                     img = self.sum_stat(img, lab)
 
-                    loss, _train_loss_sn = _loss(img, lab, epoch, freezed_epochs)
+                    loss, _train_loss_sn = self.sum_stat(img, lab, epoch, freezed_epochs)
 
                     train_loss_de_tmp += _train_loss_sn
                     
@@ -728,8 +667,8 @@ class SBIHandler():
         if self.sum_net:
             test_loss_sn_tmp = 0
         for lab, img, _  in validation_data:
-            img = self.sum_stat(img, lab)
-            loss, _test_loss_sn = _loss(img, lab, 0, 0 if self.sum_net else 1)
+            img = self._loss(img, lab)
+            loss, _test_loss_sn = self._loss(img, lab, 0, 0 if self.sum_net else 1)
             test_loss_sn_tmp += _test_loss_sn
             test_loss_de_tmp += loss.mean().item() 
         return test_loss_de_tmp / len(validation_data), test_loss_sn_tmp / len(validation_data)
@@ -781,7 +720,7 @@ class SBIHandler():
                 summary = self.summary_net(img).detach()
                 train_loss_sn_tmp = loss_function(summary, lab).mean().item()
             else:
-                summary = self.summary_net(img)
+                summary = self.sum_stat(self.summary_net(img))
                 train_loss_sn_tmp = 0
             
             

@@ -18,6 +18,8 @@ from sbi.inference.potentials.ratio_based_potential import RatioBasedPotential
 from sbi.inference.potentials.likelihood_based_potential import LikelihoodBasedPotential
 from sbi.inference.posteriors.vi_posterior import VIPosterior
 from sbi.utils import mcmc_transform
+from py21cmfast_tools import calculate_ps
+from powerbox.tools import ignore_zero_absk
 
 def cutoff_to_z(redshift_cutoff: float, path: str, prefix: str = "") -> None:
     files = fnmatch.filter(os.listdir(path), prefix + "*")
@@ -274,6 +276,151 @@ def plot_random(num: int = 5, path: str = "./", prefix: str = "run_") -> None:
         plt.title(files[idx])
         plt.tight_layout()
         plt.show()
+
+
+def convert_pt_to_2dps(path: str, prefix: str = "", debug: bool = False,
+                    summary_statistics_parameters = {
+                    "BOX_LEN": 200,
+                    "HII_DIM": 40,
+                    "z-eval": np.linspace(7, 24, 10),
+                    "bins": 8,
+                    },) -> None:
+
+    files = fnmatch.filter(os.listdir(path), prefix + "*")
+    if debug: print(f"{files}")
+    nan_counter = []
+    #zix = cut_z_idx(np.asarray(h5.File(path + files[0], 'r')["node_redshifts"]), z_cut)
+    # execute ps 1 time to find dims
+    with alive_bar(len(files), force_tty=True) as fbar:
+        for i, file in enumerate(files):
+            file = torch.load(path + file)
+            lab, img = file['labels'], file['images']
+            WDM,OMm,LX,E0,Tvir,Zeta = lab
+            with p21c.global_params.use(**{"M_WDM":WDM}):
+                cosmo_params = p21c.inputs.CosmoParams({"OMm": OMm})
+                astro_params = p21c.inputs.AstroParams({
+                    "L_X": LX,
+                    "NU_X_THRESH": E0,
+                    "ION_Tvir_MIN": Tvir,
+                    "HII_EFF_FACTOR": Zeta,
+                })
+                
+                user_params = p21c.UserParams(
+                    HII_DIM=summary_statistics_parameters['HII_DIM'], 
+                    BOX_LEN=summary_statistics_parameters['BOX_LEN'], KEEP_3D_VELOCITIES=True
+                )
+
+                lcn_distances = p21c.RectilinearLightconer.with_equal_cdist_slices(
+                    min_redshift=5.5,
+                    max_redshift=35.05,
+                    quantities=('brightness_temp', 'density', 'velocity_z'),
+                    resolution=user_params.cell_size,
+                    # index_offset=0,
+                ).lc_distances
+
+                flag_options, user_params, random_seed = p21c.inputs.FlagOptions(), p21c.inputs.UserParams(), 42
+
+                lc = p21c.LightCone(redshift=5.5, 
+                cosmo_params=cosmo_params,
+                flag_options=flag_options,
+                user_params=user_params,
+                random_seed=random_seed,
+                distances=lcn_distances,
+                astro_params=astro_params,
+                lightcones={"brightness_temp":img},
+                current_redshift=35.05)
+
+                res = calculate_ps(lc=img, lc_redshifts=lc.lightcone_redshifts[:img.shape[-1]], 
+                    box_length=summary_statistics_parameters['BOX_LEN'], box_side_shape=summary_statistics_parameters["HII_DIM"],
+                    log_bins=False, zs=summary_statistics_parameters["z-eval"], calc_1d=False, calc_2d=True, 
+                    kpar_bins=summary_statistics_parameters["bins"], nbins=summary_statistics_parameters["bins"], bin_ave=True, 
+                    k_weights=ignore_zero_absk, postprocess=True)
+
+            ps2d = res['final_ps_2D']
+
+            new_format = {
+                "images": ps2d,
+                "labels": lab,
+                #"taus": taus,
+                #"zs": zs,
+                #"gxHs": gxHs
+            }
+                #save to new format
+            torch.save(new_format, path + f"ps2d_{i}" + ".pt")
+            fbar()
+
+
+def convert_pt_to_1dps(path: str, prefix: str = "", debug: bool = False,
+                    summary_statistics_parameters = {
+                    "BOX_LEN": 200,
+                    "HII_DIM": 40,
+                    "z-eval": np.linspace(7, 24, 10),
+                    "bins": 8,
+                    },) -> None:
+
+    files = fnmatch.filter(os.listdir(path), prefix + "*")
+    if debug: print(f"{files}")
+    nan_counter = []
+    #zix = cut_z_idx(np.asarray(h5.File(path + files[0], 'r')["node_redshifts"]), z_cut)
+    # execute ps 1 time to find dims
+    with alive_bar(len(files), force_tty=True) as fbar:
+        for i, file in enumerate(files):
+            file = torch.load(path + file)
+            lab, img = file['labels'], file['images']
+            WDM,OMm,LX,E0,Tvir,Zeta = lab
+            with p21c.global_params.use(**{"M_WDM":WDM}):
+                cosmo_params = p21c.inputs.CosmoParams({"OMm": OMm})
+                astro_params = p21c.inputs.AstroParams({
+                    "L_X": LX,
+                    "NU_X_THRESH": E0,
+                    "ION_Tvir_MIN": Tvir,
+                    "HII_EFF_FACTOR": Zeta,
+                })
+                
+                user_params = p21c.UserParams(
+                    HII_DIM=summary_statistics_parameters['HII_DIM'], 
+                    BOX_LEN=summary_statistics_parameters['BOX_LEN'], KEEP_3D_VELOCITIES=True
+                )
+
+                lcn_distances = p21c.RectilinearLightconer.with_equal_cdist_slices(
+                    min_redshift=5.5,
+                    max_redshift=35.05,
+                    quantities=('brightness_temp', 'density', 'velocity_z'),
+                    resolution=user_params.cell_size,
+                    # index_offset=0,
+                ).lc_distances
+
+                flag_options, user_params, random_seed = p21c.inputs.FlagOptions(), p21c.inputs.UserParams(), 42
+
+                lc = p21c.LightCone(redshift=5.5, 
+                cosmo_params=cosmo_params,
+                flag_options=flag_options,
+                user_params=user_params,
+                random_seed=random_seed,
+                distances=lcn_distances,
+                astro_params=astro_params,
+                lightcones={"brightness_temp":img},
+                current_redshift=35.05)
+
+                res = calculate_ps(lc=img, lc_redshifts=lc.lightcone_redshifts[:img.shape[-1]], 
+                    box_length=summary_statistics_parameters['BOX_LEN'], box_side_shape=summary_statistics_parameters["HII_DIM"],
+                    log_bins=False, zs=summary_statistics_parameters["z-eval"], calc_1d=True, calc_2d=False, 
+                    nbins_1d=summary_statistics_parameters["bins"], bin_ave=True, 
+                    k_weights=ignore_zero_absk, postprocess=True)
+
+            ps1d = res['ps_1D']
+
+            new_format = {
+                "images": ps1d,
+                "labels": lab,
+                #"taus": taus,
+                #"zs": zs,
+                #"gxHs": gxHs
+            }
+                #save to new format
+            torch.save(new_format, path + f"ps1d_{i}" + ".pt")
+            fbar()
+
 
 
 def convert_to_npz(path: str, prefix: str = "run_", check_for_nan: bool = True, debug: bool = False, remove_zeros: bool = True,

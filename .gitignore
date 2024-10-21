@@ -13,7 +13,6 @@ run*
 sbi-logs
 *data*
 _cache
-#!runner.ipynb
 *.npz
 SNLE
 SNPE
