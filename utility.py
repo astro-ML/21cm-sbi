@@ -638,11 +638,7 @@ def merge_leading_dims(x, num_dims):
 def get_nre_posterior(
     ratio_estimator: torch.nn.Module,
     prior: Optional[Distribution] = None,
-    sample_with: str = "rejection",
-    mcmc_method: str = "slice_np",
-    mcmc_parameters: Dict[str, Any] = {},
-    rejection_sampling_parameters: Dict[str, Any] = {},
-    enable_transform: bool = False,
+    sample_kwargs: dict = {"sample_with": "rejection"}
 ):
     """Try it.
 
@@ -667,24 +663,23 @@ def get_nre_posterior(
     device = next(ratio_estimator.parameters()).device.type
     potential_fn = RatioBasedPotential(ratio_estimator, prior, x_o=None, device=device)
     theta_transform = mcmc_transform(
-        prior, device=device, enable_transform=enable_transform
+        prior, device=device, enable_transform=False
     )
-
+    sample_with = sample_kwargs.pop('sample_with')
     if sample_with == "mcmc":
         posterior = MCMCPosterior(
             potential_fn=potential_fn,
             theta_transform=theta_transform,
             proposal=prior,
-            method=mcmc_method,
             device=device,
-            **mcmc_parameters,
+            **sample_kwargs,
         )
     elif sample_with == "rejection":
         posterior = RejectionPosterior(
             potential_fn=potential_fn,
             proposal=prior,
             device=device,
-            **rejection_sampling_parameters,
+            **sample_kwargs,
         )
     else:
         raise NotImplementedError
@@ -695,11 +690,7 @@ def get_nre_posterior(
 def get_nle_posterior(
     likelihood_estimator: torch.nn.Module,
     prior: Optional[Distribution] = None,
-    sample_with: str = "rejection",
-    mcmc_method: str = "slice_np",
-    mcmc_parameters: Dict[str, Any] = {},
-    rejection_sampling_parameters: Dict[str, Any] = {},
-    enable_transform: bool = False,
+    sample_kwargs: dict = {"sample_with": "rejection"}
 ):
     """Try it.
 
@@ -724,25 +715,25 @@ def get_nle_posterior(
     device = next(likelihood_estimator.parameters()).device.type
     potential_fn = LikelihoodBasedPotential(likelihood_estimator, prior, x_o=None, device=device)
     theta_transform = mcmc_transform(
-        prior, device=device, enable_transform=enable_transform
+        prior, device=device, enable_transform=False
     )
-
+    sample_with = sample_kwargs.pop('sample_with')
     if sample_with == "mcmc":
         posterior = MCMCPosterior(
             potential_fn=potential_fn,
             theta_transform=theta_transform,
             proposal=prior,
-            method=mcmc_method,
             device=device,
-            **mcmc_parameters,
+            **sample_kwargs,
         )
     elif sample_with == "rejection":
         posterior = RejectionPosterior(
             potential_fn=potential_fn,
             proposal=prior,
             device=device,
-            **rejection_sampling_parameters,
+            **sample_kwargs,
         )
+    #add VI
     else:
         raise NotImplementedError
 

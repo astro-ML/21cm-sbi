@@ -131,7 +131,7 @@ class NSF_AR_Block(nn.Module):
 class NSF_AR(nn.Module):
     def __init__(self, n_blocks, in_dim, hidden_layer, n_nodes, 
                  cond_dim=6, K = 10, B=3., activation='tanh', 
-                 batch_norm=True, reversed = False, prior = BoxUniform,
+                 batch_norm=True, prior = BoxUniform,
                  device='cuda'):
         super().__init__()
         # base distribution for calculation of log prob under the model
@@ -143,7 +143,7 @@ class NSF_AR(nn.Module):
         self.condition_shape = torch.tensor([1,6])
         
         self.B = B
-        self.reversed = reversed
+        self.reversed = False
         
         # hack in prior, bettor solution TBA
         self.prior = BoxUniform(low=torch.zeros(6), high=torch.ones(6), device=device)
@@ -188,35 +188,23 @@ class NSF_AR(nn.Module):
 
         return p
     
-    def sample(self, num_samples, x, **kwargs):
+    def build_posterior(self, sample_kwargs = None):
+        self.posterior = get_nle_posterior(
+                likelihood_estimator=self,
+                prior=self.prior,
+                sample_kwargs = sample_kwargs
+                )
+        self.reversed = True
+            
+
+    def sample(self, num_samples, x, sample_kwargs = None):
         self.net.eval()
         if self.reversed:
-            return self.rev_sample(num_samples, x, **kwargs)
+            return self.posterior.sample((num_samples,), x, show_progress_bars=False)    
         else:
             u = self.base_dist.sample((num_samples,)).to(self.device)
             labels = x.repeat(num_samples,1).to(self.device)
-            return self.net.inverse(u, labels)
-    
-    def rev_sample(self,
-    num_samples: int,
-    x: torch.Tensor,
-    sample_with: str = "rejection",
-    mcmc_method: str = "slice_np",
-    mcmc_parameters: Dict[str, Any] = {},
-    rejection_sampling_parameters: Dict[str, Any] = {},
-    enable_transform: bool = False,
-    device = 'cuda',):
-        posterior = get_nle_posterior(
-            likelihood_estimator=self.to(device),
-            prior=self.prior,
-            sample_with=sample_with,
-            mcmc_method=mcmc_method,
-            mcmc_parameters=mcmc_parameters,
-            rejection_sampling_parameters=rejection_sampling_parameters,
-            enable_transform=enable_transform,
-        )
-        samples = posterior.sample((num_samples,), x=x.to(device))
-        return samples
+            return self.net.inverse(u, labels)[0]
 
     def loss(self, x, cond=None):
         u, sum_log_abs_det_jacobians = self.forward(x, cond)
@@ -228,7 +216,7 @@ class NSF_AR(nn.Module):
 class MAF(nn.Module):
     def __init__(self, n_blocks, in_dim, hidden_layer, n_nodes, 
                  cond_dim=6, activation='relu', input_order='sequential', 
-                 batch_norm=True, reversed=False, device='cuda'):
+                 batch_norm=True, device='cuda'):
         super().__init__()
         # base distribution for calculation of log prob under the model
         self.register_buffer('base_dist_mean', torch.zeros(in_dim))
@@ -249,7 +237,7 @@ class MAF(nn.Module):
 
         
         self.net = FlowSequential(*modules).to(device)
-        self.reversed = reversed
+        self.reversed = False
 
     @property
     def base_dist(self):
@@ -269,7 +257,7 @@ class MAF(nn.Module):
             raise ValueError(f"Shape of x is {x.shape} but is expected to be (sample_shape, batch_shape, event_shape) or (batch_shape, event_shape)") 
         # only there to handle weird sbi package stuff
         #print(x.shape, condition.shape)
-        s, p = self.inverse(x, condition)
+        s, p = self.forward(x, condition)
         
         if len(xshape) > 2:
             p = p.reshape(xshape[0], xshape[1], xshape[2])
@@ -279,37 +267,25 @@ class MAF(nn.Module):
 
         return p
     
-    def sample(self, num_samples, x, **kwargs):
+    def build_posterior(self, sample_kwargs = None):
+        self.posterior = get_nle_posterior(
+                likelihood_estimator=self,
+                prior=self.prior,
+                sample_kwargs = sample_kwargs
+                )
+        self.reversed = True
+            
+
+    def sample(self, num_samples, x, sample_kwargs = None):
         self.net.eval()
         if self.reversed:
-            return self.rev_sample(num_samples, x, **kwargs)
+            return self.posterior.sample((num_samples,), x, show_progress_bars=False)    
         else:
             u = self.base_dist.sample((num_samples,)).to(self.device)
             labels = x.repeat(num_samples,1).to(self.device)
-            return self.net.inverse(u, labels)
-    
-    def rev_sample(self,
-    num_samples: int,
-    x: torch.Tensor,
-    sample_with: str = "rejection",
-    mcmc_method: str = "slice_np",
-    mcmc_parameters: Dict[str, Any] = {},
-    rejection_sampling_parameters: Dict[str, Any] = {},
-    enable_transform: bool = False,
-    device = 'cuda',):
-        posterior = get_nle_posterior(
-            likelihood_estimator=self.to(device),
-            prior=self.prior,
-            sample_with=sample_with,
-            mcmc_method=mcmc_method,
-            mcmc_parameters=mcmc_parameters,
-            rejection_sampling_parameters=rejection_sampling_parameters,
-            enable_transform=enable_transform,
-        )
-        samples = posterior.sample((num_samples,), x=x.to(device))
-        return samples
+            return self.net.inverse(u, labels)[0]
 
     def loss(self, x, cond=None):
         u, sum_log_abs_det_jacobians = self.forward(x, cond)
         #print("base_dist: ", self.base_dist.log_prob(u).mean().item(), "jac: ", sum_log_abs_det_jacobians.mean().detach().item())
-        return - torch.sum(self.base_dist.log_prob(u) + sum_log_abs_det_jacobians, dim=1), u
+        return - torch.sum(self.base_dist.log_prob(u) + sum_log_abs_det_jacobians, dim=1)

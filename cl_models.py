@@ -20,14 +20,14 @@ DEFAULT_MIN_DERIVATIVE = 1e-3
 class RNVP(nn.Module):
     def __init__(self, in_dim: int, n_blocks: int, n_nodes: int, cond_dim: int = 6,
                  hidden_layer = 1, batch_norm: bool = False, 
-                 activation = 'relu', reversed = False, device = 'cuda'):
+                 activation = 'relu', device = 'cuda'):
         super().__init__()
         self.in_dim = in_dim
         self.n_blocks = n_blocks
         self.n_nodes = n_nodes
         self.cond_dim = cond_dim
         self.batch_norm = batch_norm
-        self.reversed = reversed
+        self.reversed = False
         self.device = device
         
         # setup activation
@@ -100,37 +100,28 @@ class RNVP(nn.Module):
         p = p / self.in_dim
 
         return - p
-    
-    def sample(self, num_samples, x, **kwargs):
+
+    def build_posterior(self, sample_kwargs):
+        self.posterior = get_nle_posterior(
+                likelihood_estimator=self,
+                prior=self.prior,
+                sample_with=sample_kwargs.pop("sample_with"),
+                mcmc_parameters = sample_kwargs,
+                rejection_sampling_parameters = sample_kwargs,
+                enable_transform = False,
+                )
+        self.reversed = True
+            
+
+    def sample(self, num_samples, x, sample_kwargs = None):
         self.net.eval()
         if self.reversed:
-            return self.rev_sample(num_samples, x, **kwargs)
+            return self.posterior.sample((num_samples,), x, show_progress_bars=False)    
         else:
             z = torch.randn(num_samples, self.in_dim).to(self.device)
             # add rejection sampling TODO
             samples,_ = self.net(z, c = [x.repeat((num_samples,1)).to(self.device)], rev=True)
             return samples
-    
-    def rev_sample(self,
-    num_samples: int,
-    x: torch.Tensor,
-    sample_with: str = "rejection",
-    mcmc_method: str = "slice_np",
-    mcmc_parameters: Dict[str, Any] = {},
-    rejection_sampling_parameters: Dict[str, Any] = {},
-    enable_transform: bool = False,
-    device = 'cuda',):
-        posterior = get_nle_posterior(
-            likelihood_estimator=self.to(device),
-            prior=self.prior,
-            sample_with=sample_with,
-            mcmc_method=mcmc_method,
-            mcmc_parameters=mcmc_parameters,
-            rejection_sampling_parameters=rejection_sampling_parameters,
-            enable_transform=enable_transform,
-        )
-        samples = posterior.sample((num_samples,), x=x.to(device))
-        return samples
     
     def loss(self, x: torch.FloatTensor, cond: torch.FloatTensor) -> torch.FloatTensor:
         z, jac = self.net(x, c=[cond], rev=False)

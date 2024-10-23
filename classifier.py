@@ -135,7 +135,6 @@ class ResNet(nn.Module):
 
         # TODO: Implement sampling from prior to explore full marginal
         probs = torch.ones(batch_size, batch_size) * (1 - torch.eye(batch_size)) / (batch_size - 1)
-
         choices = torch.multinomial(probs, num_samples=num_classes -1, replacement=False)
 
         contrasting_theta = theta[choices]
@@ -145,28 +144,18 @@ class ResNet(nn.Module):
         )
 
         return self.forward(atomic_theta, repeated_x)
-    
-    def sample(self,
-    num_samples: int,
-    x: torch.Tensor,
-    prior: Optional[Distribution] = None,
-    sample_with: str = "rejection",
-    mcmc_method: str = "slice_np",
-    mcmc_parameters: Dict[str, Any] = {},
-    rejection_sampling_parameters: Dict[str, Any] = {},
-    enable_transform: bool = True,
-    device = 'cuda',):
+
+    def build_posterior(self, sample_kwargs):
         posterior = get_nre_posterior(
-            ratio_estimator=self.to(device),
+            ratio_estimator=self,
             prior=self.prior,
-            sample_with=sample_with,
-            mcmc_method=mcmc_method,
-            mcmc_parameters=mcmc_parameters,
-            rejection_sampling_parameters=rejection_sampling_parameters,
-            enable_transform=enable_transform,
-        )
-        samples = posterior.sample((num_samples,), x=x.to(device))
-        return samples
+            sample_kwargs=sample_kwargs,)
+        self.posterior = posterior
+            
+
+    def sample(self, num_samples, x, sample_kwargs = None):
+        self.classifier.eval()
+        return self.posterior.sample((num_samples,), x, show_progress_bars=False)    
         
 
         
@@ -177,4 +166,5 @@ class ResNet(nn.Module):
         return p_marginal, p_joint
     
     
-    
+
+

@@ -335,7 +335,7 @@ class Summary_net_lc_benedikt(nn.Module):
 
         return x
 
-class Summary_net_1dps(nn.Module):
+'''class Summary_net_1dps(nn.Module):
     def __init__(self):
         super().__init__()
         self.linear_conv_stack = nn.Sequential(
@@ -373,13 +373,71 @@ class Summary_net_1dps(nn.Module):
         )
 
     def forward(self, x):
-        print(x.shape)
         x = self.linear_conv_stack(x)
-        print(x.shape)
         x = self.flatten(x)
-        print(x.shape)
         x = self.linear_stack(x)
-        print(x.shape)
+        return x
+'''
+# old: .044
+# old_charged: .039
+# more_params: .037
+# more_params with add linear: .036
+# linear_conv_stack_z: .037
+# linear_conv_stack_z with max first: .038
+class Summary_net_1dps(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear_conv_stack = nn.Sequential(
+            nn.Conv1d(10, 32, 3, padding=1),
+            nn.GELU(),
+            nn.MaxPool1d(2),
+            nn.BatchNorm1d(32),
+            nn.Conv1d(32, 64, 3, padding=1),
+            nn.GELU(),
+            nn.MaxPool1d(2),
+            nn.BatchNorm1d(64),
+            nn.Conv1d(64, 96, 3, padding=1),
+            nn.GELU(),
+            nn.MaxPool1d(2),
+            nn.BatchNorm1d(96),
+        )
+        self.flatten = nn.Flatten()
+
+        self.linear_conv_stack_z = nn.Sequential(
+            nn.Conv1d(1, 16, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool1d(4),
+            nn.BatchNorm1d(16),
+            nn.Conv1d(16, 24, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool1d(4),
+            nn.BatchNorm1d(24),
+            nn.Conv1d(24, 32, 3, padding=1),
+            nn.ReLU(),
+            nn.AvgPool1d(4),
+            nn.BatchNorm1d(32),
+        )
+
+        self.linear_stack = nn.Sequential(
+            nn.Linear(96,64),
+            nn.Dropout(0.1),
+            nn.GELU(),
+            nn.Linear(64,32),
+            nn.Dropout(0.1),
+            nn.GELU(),
+            nn.Linear(32,16),
+            nn.GELU(),
+            nn.Linear(16,6),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        x = self.linear_conv_stack(x)
+        x = self.flatten(x)
+        #x = x.unsqueeze(-2)
+        #x = self.linear_conv_stack_z(x)
+        #x = self.flatten(x)
+        x = self.linear_stack(x)
         return x
 
 class Summary_net_2dps(nn.Module):
