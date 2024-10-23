@@ -146,6 +146,7 @@ class ResNet(nn.Module):
         return self.forward(atomic_theta, repeated_x)
 
     def build_posterior(self, sample_kwargs):
+        self.classifier.eval()
         posterior = get_nre_posterior(
             ratio_estimator=self,
             prior=self.prior,
@@ -154,7 +155,6 @@ class ResNet(nn.Module):
             
 
     def sample(self, num_samples, x, sample_kwargs = None):
-        self.classifier.eval()
         return self.posterior.sample((num_samples,), x, show_progress_bars=False)    
         
 

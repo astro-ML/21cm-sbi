@@ -536,7 +536,7 @@ class NPEHandler():
 
     def train(self, training_data: object, test_data: object, epochs: int = 20, freezed_epochs: int = 0, pretrain_epochs: int = 0, optimizer = torch.optim.Adam,
               optimizer_kwargs: dict = {"lr": 1e-4}, loss_function: Callable = torch.nn.MSELoss, loss_params: dict = {}, device: str = None, plot: bool = True,
-              grad_clip: float = 0):
+              grad_clip: float = 0, lossfile: str = ""):
         
         # set bool for gradient clipping
         if grad_clip > 0:
@@ -644,8 +644,8 @@ class NPEHandler():
             plt.ylabel("norm loss")
             plt.title("Log loss during training")
             plt.legend()
-            plt.savefig("./training_loss.png", dpi=400)
-            plt.show()
+            if lossfile == "": plt.show()
+            else: plt.savefig(f"./{lossfile}.png", dpi=400)
             plt.clf()
     
     @torch.no_grad()   
@@ -948,7 +948,7 @@ class NLEHandler(NPEHandler):
         
     def train(self, training_data: object, test_data: object, epochs: int = 20, freezed_epochs: int = 0, pretrain_epochs: int = 0, optimizer = torch.optim.Adam,
               optimizer_kwargs: dict = {"lr": 1e-4}, loss_function: Callable = torch.nn.MSELoss, loss_params: dict = {'reduction': 'none', 'kernel_size': 10}, device: str = None, plot: bool = True,
-              grad_clip: float = 0):
+              grad_clip: float = 0, lossfile: str = ""):
         
         # set bool for gradient clipping
         if grad_clip > 0:
@@ -1093,8 +1093,8 @@ class NLEHandler(NPEHandler):
             plt.ylabel("loss")
             plt.title("Log loss during training")
             plt.legend()
-            plt.savefig("./training_loss.png", dpi=400)
-            plt.show()
+            if lossfile == "": plt.show()
+            else: plt.savefig(f"./{lossfile}.png", dpi=400)
             plt.clf()
     
     @torch.no_grad()   

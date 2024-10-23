@@ -189,6 +189,7 @@ class NSF_AR(nn.Module):
         return p
     
     def build_posterior(self, sample_kwargs = None):
+        self.net.eval()
         self.posterior = get_nle_posterior(
                 likelihood_estimator=self,
                 prior=self.prior,
@@ -198,7 +199,6 @@ class NSF_AR(nn.Module):
             
 
     def sample(self, num_samples, x, sample_kwargs = None):
-        self.net.eval()
         if self.reversed:
             return self.posterior.sample((num_samples,), x, show_progress_bars=False)    
         else:
@@ -268,6 +268,7 @@ class MAF(nn.Module):
         return p
     
     def build_posterior(self, sample_kwargs = None):
+        self.net.eval()
         self.posterior = get_nle_posterior(
                 likelihood_estimator=self,
                 prior=self.prior,
@@ -277,7 +278,6 @@ class MAF(nn.Module):
             
 
     def sample(self, num_samples, x, sample_kwargs = None):
-        self.net.eval()
         if self.reversed:
             return self.posterior.sample((num_samples,), x, show_progress_bars=False)    
         else:
