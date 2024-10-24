@@ -423,7 +423,7 @@ class DataHandler():
         return (images, labels)
     
     def denormalize(self, labels: torch.FloatTensor,
-                  epsilon: float = 1e-2) -> torch.FloatTensor:
+                  epsilon: float = 1e-4) -> torch.FloatTensor:
         labels = labels * (self.norm_range[:,1] - self.norm_range[:,0] + 2*epsilon) + self.norm_range[:,0] - epsilon
         return labels
 

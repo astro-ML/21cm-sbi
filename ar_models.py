@@ -132,7 +132,7 @@ class NSF_AR(nn.Module):
     def __init__(self, n_blocks, in_dim, hidden_layer, n_nodes, 
                  cond_dim=6, K = 10, B=3., activation='tanh', 
                  batch_norm=True, prior = BoxUniform,
-                 device='cuda'):
+                 device='cuda', epsilon = 1e-4):
         super().__init__()
         # base distribution for calculation of log prob under the model
         self.register_buffer('base_dist_mean', torch.zeros(in_dim))
@@ -146,7 +146,7 @@ class NSF_AR(nn.Module):
         self.reversed = False
         
         # hack in prior, bettor solution TBA
-        self.prior = BoxUniform(low=torch.zeros(6), high=torch.ones(6), device=device)
+        self.prior = BoxUniform(low=torch.zeros(6)+epsilon, high=torch.ones(6)-epsilon, device=device)
         
         # construct model
         modules = []
@@ -216,7 +216,7 @@ class NSF_AR(nn.Module):
 class MAF(nn.Module):
     def __init__(self, n_blocks, in_dim, hidden_layer, n_nodes, 
                  cond_dim=6, activation='relu', input_order='sequential', 
-                 batch_norm=True, device='cuda'):
+                 batch_norm=True, device='cuda', epsilon = 1e-4):
         super().__init__()
         # base distribution for calculation of log prob under the model
         self.register_buffer('base_dist_mean', torch.zeros(in_dim))
@@ -225,7 +225,7 @@ class MAF(nn.Module):
         self.cond_dim = cond_dim
 
         # Hack in prior, bettert oslution TBA
-        self.prior = BoxUniform(low=torch.zeros(6), high=torch.ones(6), device=device)
+        self.prior = BoxUniform(low=torch.zeros(6)+epsilon, high=torch.ones(6)-epsilon, device=device)
         
         # construct model
         modules = []

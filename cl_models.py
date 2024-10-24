@@ -20,7 +20,7 @@ DEFAULT_MIN_DERIVATIVE = 1e-3
 class RNVP(nn.Module):
     def __init__(self, in_dim: int, n_blocks: int, n_nodes: int, cond_dim: int = 6,
                  hidden_layer = 1, batch_norm: bool = False, 
-                 activation = 'relu', device = 'cuda'):
+                 activation = 'relu', device = 'cuda', epsilon = 1e-4):
         super().__init__()
         self.in_dim = in_dim
         self.n_blocks = n_blocks
@@ -43,7 +43,7 @@ class RNVP(nn.Module):
         self.net = self.model(in_dim, n_blocks, n_nodes, cond_dim, hidden_layer, activation_fn).to(device)
         
         # Hack in prior, bettert oslution TBA
-        self.prior = BoxUniform(low=torch.zeros(in_dim), high=torch.ones(in_dim), device=device)
+        self.prior = BoxUniform(low=torch.zeros(in_dim)+epsilon, high=torch.ones(in_dim)-epsilon, device=device)
         
     def model(self, n_dim: int, n_blocks: int, n_nodes: int, cond_dims: int, hidden_layer: int,
               activation_fn: Callable) -> Ff.SequenceINN:
