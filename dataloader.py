@@ -18,6 +18,7 @@ from plot import pairplot
 from scipy.stats import kstest, uniform, gaussian_kde
 from py21cmfast_tools import calculate_ps
 from powerbox.tools import ignore_zero_absk
+from torchrl.modules import TruncatedNormal
 
 
 # write additional class for model itself
@@ -98,7 +99,6 @@ class SumnetHandler():
                 self.Model.train()
                 for lab, img, _ in training_data:
                     img, lab = img.to(self.device), lab.to(self.device)
-
                     x = self.Model(img)
                     loss = self.lossf(lab, x)
                     loss.backward()
@@ -350,7 +350,7 @@ class DataHandler():
         else: self.files = self.files[int(len(self.files)*split):]
         self.norm_range = norm_range
         self.apply_norm = apply_norm
-
+        self.psvar = psvar
         if 1 > augmentation_probability > 0 and not psvar:
             # augmentation probability
             self.transforms = v2.Compose([
@@ -360,6 +360,7 @@ class DataHandler():
             self.augment_data = True
         elif 1 > augmentation_probability > 0 and psvar:
             self.transforms = PSCosmicVariance(p=augmentation_probability)
+            self.augment_data = True
         else:
             self.augment_data = False
 
@@ -397,7 +398,7 @@ class DataHandler():
         # keep in mind the order! Here, noise will also be augmented
         if self.noise: images = self.noise_model(images)
         if self.apply_norm: images, labels = self.normalize(images=images, labels=labels)
-        if self.augment_data: images = self.transforms(images)
+        if self.augment_data: images = self.transforms(images) if not self.psvar else self.transforms(images, data['std'])
         if self.expand_dim: images = images.unsqueeze(0)
         return (labels, images, idx)
     
@@ -412,7 +413,7 @@ class DataHandler():
         plt.show()
 
     def normalize(self, labels: torch.FloatTensor, images: torch.FloatTensor = None, 
-                  epsilon: float = 1e-2) -> tuple[torch.FloatTensor, ...]:
+                  epsilon: float = 1e-4) -> tuple[torch.FloatTensor, ...]:
         if images is not None:
             #print(f'{images.shape}')
             diff = images.max() - images.min()
@@ -524,9 +525,9 @@ class PSCosmicVariance(torch.nn.Module):
     def __init__(self,p: float):
         super().__init__()
         self.p = p
-    def forward(self, img, var):
+    def forward(self, img, std):
         if torch.rand(1).item() < self.p:
-            return img + torch.normal(mean=torch.zeros(var.shape), std=var)
+            return img + TruncatedNormal(torch.zeros(std.shape), std, low=-2*std,high=2*std+1e-4).sample((1,)).squeeze(0).to(torch.float32)
         else:
             return img
         

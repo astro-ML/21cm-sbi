@@ -388,18 +388,74 @@ class Summary_net_1dps(nn.Module):
     def __init__(self):
         super().__init__()
         self.linear_conv_stack = nn.Sequential(
-            nn.Conv1d(10, 32, 3, padding=1),
+            nn.Conv1d(10, 15, 3, padding=1),
             nn.GELU(),
             nn.MaxPool1d(2),
+            nn.BatchNorm1d(15),
+            nn.Conv1d(15, 20, 3, padding=1),
+            nn.GELU(),
+            nn.MaxPool1d(2),
+            nn.BatchNorm1d(20),
+            nn.Conv1d(20, 25, 3, padding=1),
+            nn.GELU(),
+            nn.MaxPool1d(2),
+            nn.BatchNorm1d(25),
+        )
+        self.flatten = nn.Flatten()
+
+        self.linear_conv_stack_z = nn.Sequential(
+            nn.Conv1d(1, 16, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool1d(4),
+            nn.BatchNorm1d(16),
+            nn.Conv1d(16, 24, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool1d(4),
+            nn.BatchNorm1d(24),
+            nn.Conv1d(24, 32, 3, padding=1),
+            nn.ReLU(),
+            nn.AvgPool1d(4),
             nn.BatchNorm1d(32),
-            nn.Conv1d(32, 64, 3, padding=1),
+        )
+
+        self.linear_stack = nn.Sequential(
+            nn.Linear(25,20),
+            nn.Dropout(0.1),
             nn.GELU(),
-            nn.MaxPool1d(2),
-            nn.BatchNorm1d(64),
-            nn.Conv1d(64, 96, 3, padding=1),
+            nn.Linear(20,15),
+            nn.Dropout(0.1),
             nn.GELU(),
-            nn.MaxPool1d(2),
-            nn.BatchNorm1d(96),
+            nn.Linear(15,10),
+            nn.GELU(),
+            nn.Linear(10,6),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        x = self.linear_conv_stack(x)
+        x = self.flatten(x)
+        #x = x.unsqueeze(-2)
+        #x = self.linear_conv_stack_z(x)
+        #x = self.flatten(x)
+        x = self.linear_stack(x)
+        return x
+
+class Summary_net_2dps(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear_conv_stack = nn.Sequential(
+            nn.Conv2d(10, 32, 3, padding=1),
+            nn.GELU(),
+            nn.MaxPool2d(2),
+            nn.BatchNorm2d(32),
+            nn.Conv2d(32, 64, 3, padding=1),
+            nn.GELU(),
+            nn.MaxPool2d(2),
+            nn.BatchNorm2d(64),
+            nn.Conv2d(64, 96, 3, padding=1),
+            nn.GELU(),
+            nn.MaxPool2d(2),
+            nn.BatchNorm2d(96),
         )
         self.flatten = nn.Flatten()
 
@@ -430,49 +486,6 @@ class Summary_net_1dps(nn.Module):
             nn.Linear(16,6),
             nn.Sigmoid()
         )
-
-    def forward(self, x):
-        x = self.linear_conv_stack(x)
-        x = self.flatten(x)
-        #x = x.unsqueeze(-2)
-        #x = self.linear_conv_stack_z(x)
-        #x = self.flatten(x)
-        x = self.linear_stack(x)
-        return x
-
-class Summary_net_2dps(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear_conv_stack = nn.Sequential(
-            torch.nn.Conv2d(10, 32, 3, 1),
-            nn.ReLU(),
-            nn.MaxPool2d(3),
-            nn.Conv2d(32, 64, 3, 1),
-            nn.ReLU(),
-            nn.MaxPool2d(3),
-            nn.Conv2d(64, 128, 3, 1),
-            nn.ReLU(),
-            nn.MaxPool2d(3),
-            nn.Conv2d(128, 128, 3, 1, 1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-        )
-        self.flatten = nn.Flatten()
-        self.linear_stack = nn.Sequential(
-            nn.Linear(128,128),
-            nn.ReLU(),
-            nn.Linear(128,32),
-            nn.ReLU(),
-            nn.Linear(32,6),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        
-        x = self.linear_conv_stack(x)
-        x = self.flatten(x)
-        x = self.linear_stack(x)
-        return x
 
 class cINN_net(nn.Module):
     def __init__(self):
