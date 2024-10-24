@@ -334,13 +334,15 @@ def convert_pt_to_2dps(path: str, prefix: str = "", debug: bool = False,
                     box_length=summary_statistics_parameters['BOX_LEN'], box_side_shape=summary_statistics_parameters["HII_DIM"],
                     log_bins=False, zs=summary_statistics_parameters["z-eval"], calc_1d=False, calc_2d=True, 
                     kpar_bins=summary_statistics_parameters["bins"], nbins=summary_statistics_parameters["bins"], bin_ave=True, 
-                    k_weights=ignore_zero_absk, postprocess=True)
+                    k_weights=ignore_zero_absk, postprocess=True, get_variance=True)
 
             ps2d = res['final_ps_2D']
+            var = rers["final_var_2D"]
 
             new_format = {
                 "images": torch.as_tensor(ps2d, dtype=torch.float32),
                 "labels": torch.as_tensor(lab, dtype=torch.float32),
+                "var": torch.as_tensor(var, dtype=torch.float32),
                 #"taus": taus,
                 #"zs": zs,
                 #"gxHs": gxHs
@@ -406,13 +408,15 @@ def convert_pt_to_1dps(path: str, prefix: str = "", debug: bool = False,
                     box_length=summary_statistics_parameters['BOX_LEN'], box_side_shape=summary_statistics_parameters["HII_DIM"],
                     log_bins=False, zs=summary_statistics_parameters["z-eval"], calc_1d=True, calc_2d=False, 
                     nbins_1d=summary_statistics_parameters["bins"], bin_ave=True, 
-                    k_weights=ignore_zero_absk, postprocess=True)
+                    k_weights=ignore_zero_absk, postprocess=True, get_variance=True)
 
             ps1d = res['ps_1D']
+            var = res["var_1D"]
 
             new_format = {
                 "images": torch.as_tensor(ps1d, dtype=torch.float32),
                 "labels": torch.as_tensor(lab, dtype=torch.float32),
+                "var": torch.as_tensor(var, dtype=torch.float32),
                 #"taus": taus,
                 #"zs": zs,
                 #"gxHs": gxHs
