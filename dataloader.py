@@ -359,7 +359,7 @@ class DataHandler():
             Transpose(p=augmentation_probability)])
             self.augment_data = True
         elif 1 > augmentation_probability > 0 and psvar:
-
+            self.transforms = PSCosmicVariance(p=augmentation_probability)
         else:
             self.augment_data = False
 

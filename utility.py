@@ -313,7 +313,8 @@ def convert_pt_to_2dps(path: str, prefix: str = "", debug: bool = False,
                 lcn_distances = p21c.RectilinearLightconer.with_equal_cdist_slices(
                     min_redshift=5.5,
                     max_redshift=35.05,
-                    quantities=('brightness_temp', 'density', 'velocity_z'),
+                    cosmo=cosmo_params.cosmo,
+                    quantities=('brightness_temp'),
                     resolution=user_params.cell_size,
                     # index_offset=0,
                 ).lc_distances
@@ -356,7 +357,7 @@ def convert_pt_to_1dps(path: str, prefix: str = "", debug: bool = False,
                     summary_statistics_parameters = {
                     "BOX_LEN": 200,
                     "HII_DIM": 28,
-                    "z-eval": np.linspace(7, 24, 10),
+                    "z-eval": np.linspace(7, 19, 10),
                     "bins": 8,
                     },) -> None:
 
@@ -385,14 +386,15 @@ def convert_pt_to_1dps(path: str, prefix: str = "", debug: bool = False,
                 )
 
                 lcn_distances = p21c.RectilinearLightconer.with_equal_cdist_slices(
-                    min_redshift=5.5,
+                    min_redshift=6.5,
                     max_redshift=35.05,
-                    quantities=('brightness_temp', 'density', 'velocity_z'),
+                    quantities=('brightness_temp'),
+                    cosmo=cosmo_params.cosmo,
                     resolution=user_params.cell_size,
                     # index_offset=0,
                 ).lc_distances
-
-                flag_options, user_params, random_seed = p21c.inputs.FlagOptions(), p21c.inputs.UserParams(), 42
+                
+                flag_options, random_seed = p21c.inputs.FlagOptions(), 42
 
                 lc = p21c.LightCone(redshift=5.5, 
                 cosmo_params=cosmo_params,
