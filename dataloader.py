@@ -340,7 +340,8 @@ class DataHandler():
     def __init__(self, path: str = "./", prefix: str = "batch_",
                  split: float = 1, training_data: bool = True, noise_model: object = None,
                  norm_range: torch.FloatTensor = None, apply_norm: bool = False, 
-                 augmentation_probability: float = 0.5, expand_dim: bool = True) -> None:
+                 augmentation_probability: float = 0.5, expand_dim: bool = True,
+                 psvar: bool = False) -> None:
         #super().__init__()
         self.path = path
         self.prefix = prefix
@@ -350,13 +351,15 @@ class DataHandler():
         self.norm_range = norm_range
         self.apply_norm = apply_norm
 
-        if 1 > augmentation_probability > 0:
+        if 1 > augmentation_probability > 0 and not psvar:
             # augmentation probability
             self.transforms = v2.Compose([
             v2.RandomHorizontalFlip(p=augmentation_probability),
             v2.RandomVerticalFlip(p=augmentation_probability),
             Transpose(p=augmentation_probability)])
             self.augment_data = True
+        elif 1 > augmentation_probability > 0 and psvar:
+
         else:
             self.augment_data = False
 
@@ -514,6 +517,16 @@ class Transpose(torch.nn.Module):
     def forward(self, img):
         if torch.rand(1).item() < self.p:
             return torch.transpose(img, -3,-2)
+        else:
+            return img
+
+class PSCosmicVariance(torch.nn.Module):
+    def __init__(self,p: float):
+        super().__init__()
+        self.p = p
+    def forward(self, img, var):
+        if torch.rand(1).item() < self.p:
+            return img + torch.normal(mean=torch.zeros(var.shape), std=var)
         else:
             return img
         
