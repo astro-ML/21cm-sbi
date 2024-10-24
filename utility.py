@@ -338,7 +338,7 @@ def convert_pt_to_2dps(path: str, prefix: str = "", debug: bool = False,
                     k_weights=ignore_zero_absk, postprocess=True, get_variance=True)
 
             ps2d = res['final_ps_2D']
-            std = torch.sqrt(torch.as_tensor(res["var_1D"]))
+            std = torch.sqrt(torch.as_tensor(res["final_var_2D"]))
 
             new_format = {
                 "images": torch.as_tensor(ps2d, dtype=torch.float32),
