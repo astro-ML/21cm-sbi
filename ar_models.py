@@ -138,7 +138,6 @@ class NSF_AR(nn.Module):
         self.register_buffer('base_dist_mean', torch.zeros(in_dim))
         self.register_buffer('base_dist_var', torch.ones(in_dim))
         self.device = device
-        self.cond_dim = cond_dim
         
         self.condition_shape = torch.tensor([1,6])
         
@@ -156,6 +155,8 @@ class NSF_AR(nn.Module):
                                      cond_dim=cond_dim, device=device,
                                      B=B, K=K)]
             modules += batch_norm * [BatchNorm(in_dim)]
+        
+        self.condition_shape = torch.Size((cond_dim,))
         self.net = FlowSequential(*modules).to(device)
         
     @property
@@ -222,7 +223,7 @@ class MAF(nn.Module):
         self.register_buffer('base_dist_mean', torch.zeros(in_dim))
         self.register_buffer('base_dist_var', torch.ones(in_dim))
         self.device = device
-        self.cond_dim = cond_dim
+        self.condition_shape = torch.Size((cond_dim,))
 
         # Hack in prior, bettert oslution TBA
         self.prior = BoxUniform(low=torch.zeros(6)+epsilon, high=torch.ones(6)-epsilon, device=device)

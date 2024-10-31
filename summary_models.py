@@ -386,40 +386,34 @@ class Summary_net_lc_benedikt(nn.Module):
 # linear_conv_stack_z with max first: .038
 class Summary_net_1dps(nn.Module):
     def __init__(self):
-        super().__init__()
-        self.linear_conv_stack = nn.Sequential(
-            nn.Conv1d(10, 15, 3, padding=1),
-            nn.GELU(),
-            nn.MaxPool1d(2),
-            nn.BatchNorm1d(15),
-            nn.Conv1d(15, 20, 3, padding=1),
-            nn.GELU(),
-            nn.MaxPool1d(2),
-            nn.BatchNorm1d(20),
-            nn.Conv1d(20, 25, 3, padding=1),
-            nn.GELU(),
-            nn.MaxPool1d(2),
-            nn.BatchNorm1d(25),
+        super().__init__(z_slices: int = 10,
+                         cond_size: int = 2,
+                         feature_size: int = 6)
+        
+        self.conditioning1 = nn.Sequential(
+            nn.Linear(cond_size,feature_size),
+            nn.Tanh()
         )
+
+        self.conv1 = nn.Conv1d(z_slices, 20, 3, padding=1)
+        self.pool1 = nn.MaxPool1d(2)
+        self.activation1 = nn.GELU()
+        self.bn1 = nn.BatchNorm1d(20)
+
+        self.conv2 = nn.Conv1d(20, 25, 3, padding=1)
+        self.pool2 = nn.MaxPool1d(2)
+        self.activation2 = nn.GELU()
+        self.bn2 = nn.BatchNorm1d(25)
+
+        self.conv3 = nn.Conv1d(25, 30, 3, padding=1)
+        self.pool3 = nn.MaxPool1d(2)
+        self.activation3 = nn.GELU()
+        self.bn3 = nn.BatchNorm1d(30)
+
         self.flatten = nn.Flatten()
 
-        self.linear_conv_stack_z = nn.Sequential(
-            nn.Conv1d(1, 16, 3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool1d(4),
-            nn.BatchNorm1d(16),
-            nn.Conv1d(16, 24, 3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool1d(4),
-            nn.BatchNorm1d(24),
-            nn.Conv1d(24, 32, 3, padding=1),
-            nn.ReLU(),
-            nn.AvgPool1d(4),
-            nn.BatchNorm1d(32),
-        )
-
         self.linear_stack = nn.Sequential(
-            nn.Linear(25,20),
+            nn.Linear(30,20),
             nn.Dropout(0.1),
             nn.GELU(),
             nn.Linear(20,15),
@@ -431,8 +425,28 @@ class Summary_net_1dps(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, x):
-        x = self.linear_conv_stack(x)
+    def forward(self, x, cond=None):
+        if self.cond is not None:
+            cond = self.conditioning1(cond)
+            a1, a2, a3, b1, b2, b3 = cond.T.unsqueeze(-1).unsqueeze(-1)
+        else:
+            a1, a2, a3, b1, b2, b3 = [1,1,1,0,0,0]
+
+        x = self.conv1(x)*a1 + b1
+        x = self.pool1(x)
+        x = self.activation1(x)
+        x = self.bn1(x)
+
+        x = self.conv2(x)*a2 + b2
+        x = self.pool2(x)
+        x = self.activation2(x)
+        x = self.bn2(x)
+
+        x = self.conv3(x)*a3 + b3
+        x = self.pool3(x)
+        x = self.activation3(x)
+        x = self.bn3(x)
+
         x = self.flatten(x)
         #x = x.unsqueeze(-2)
         #x = self.linear_conv_stack_z(x)

@@ -31,3 +31,8 @@ ppc.py
 !summary_models.py
 !ar_models.py
 !cl_models.py
+!NPE.py
+!NLE.py
+!NRE.py
+!Trainer.py
+!analysis.py
