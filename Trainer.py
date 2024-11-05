@@ -5,9 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from alive_progress import alive_bar
 
-
-
-class DensnetHandler():
+# DEPRICATED, WILL BE REMOVED IN THE FUTURE
+'''class DensnetHandler():
     def __init__(self, Model: object, Training_data: object = None, Test_data: object = None, device = "cuda"):
         self.TrainingD = Training_data
         self.TestD = Test_data
@@ -64,7 +63,7 @@ class DensnetHandler():
     
     def load(self, path: str = "de_model.pt"):
         self.Model.load_state_dict(torch.load(path, map_location=torch.device(self.device)))
-        self.Model.eval()
+        self.Model.eval()'''
 
 class SumnetHandler():
     def __init__(self, Model: object, device = "cuda",
@@ -322,6 +321,3 @@ class RecNetHandler(SumnetHandler):
                     num_samples -= 1
                 else:
                     break
-
-        
-        

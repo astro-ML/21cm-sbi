@@ -6,6 +6,17 @@ from alive_progress import alive_bar
 from logging import info, warning, error
 from Trainer import SumnetHandler
 
+import os
+import tempfile
+
+from ray import train, tune
+from ray.tune.schedulers import ASHAScheduler
+
+from ray.train import Checkpoint
+
+from ray.tune.search.hyperopt import HyperOptSearch
+
+
 class NPEHandler():
     def __init__(self, density_estimator, summary_net = None,
                  device = 'cuda'):
@@ -17,8 +28,9 @@ class NPEHandler():
             self.summary_net = summary_net
         self.summary_net = summary_net
         self.device = device
+        self.opti_hype = False
         
-        info("Succesfully initialized SBIHandler")
+        info("Succesfully initialized NPEHandler")
 
     def train(self, training_data: object, test_data: object, epochs: int = 20, freezed_epochs: int = 0, pretrain_epochs: int = 0, optimizer = torch.optim.Adam,
               optimizer_kwargs: dict = {"lr": 1e-4}, loss_function: Callable = torch.nn.MSELoss, loss_params: dict = {}, device: str = None, plot: bool = True,
@@ -108,6 +120,20 @@ class NPEHandler():
                 if self.sum_net:
                     train_loss_sn.append(train_loss_sn_tmp / len(training_data))
                     test_loss_sn.append(test_loss_sn_tmp)
+                
+                if self.opti_hype:
+                    with tempfile.TemporaryDirectory() as temp_checkpoint_dir:
+                        checkpoint = None
+                        if (i + 1) % 5 == 0:
+                            # This saves the model to the trial directory
+                            torch.save(
+                                self.density_estimator.state_dict(),
+                                os.path.join(temp_checkpoint_dir, "model.pth")
+                            )
+                            checkpoint = Checkpoint.from_directory(temp_checkpoint_dir)
+
+                        # Send the current training result back to Tune
+                        train.report({"mean_loss": test_loss_de_tmp}, checkpoint=checkpoint)
                     
                 bar()
                 
@@ -120,7 +146,7 @@ class NPEHandler():
         self.summary_net.eval()
         self.density_estimator.eval()
         
-        if plot:      
+        if plot:     
             plt.plot(np.linspace(0, epochs, len(train_loss_de)), train_loss_de, label='Trainingsloss DE', alpha=0.5)
             plt.plot(np.linspace(0, epochs, len(test_loss_de)), test_loss_de, label='Testloss DE')
             if self.sum_net:
@@ -135,6 +161,40 @@ class NPEHandler():
             plt.clf()
         return {"trainloss": train_loss_de, 
         "testloss": test_loss_de}
+    
+    def grid_search(self, search_space: dict, training_data: object, test_data: object, train_kwargs: dict = {}):
+        """Perform a grid search using Baysian optimization.
+
+        Args:
+            search_space (dict): Dict containing the search space. An example might look like
+            from hyperopt import hp
+            search_space = {
+                "lr": hp.loguniform("lr", -10, -1),
+                "momentum": hp.uniform("momentum", 0.1, 0.9),
+            }
+            training_data (object): Torch dataloader containing the trainingsdata
+            test_data (object): Torch dataloader containing the testdata
+            train_kwargs (dict, optional): Addition parameter passed to the training function. Defaults to {}.
+        """
+        hyperopt_search = HyperOptSearch(search_space, metric="mean_loss", mode="min")
+        tuner = tune.Tuner(
+            tune.with_parameters(self.train, training_data=training_data, test_data=test_data, **train_kwargs),
+            tune_config=tune.TuneConfig(
+                num_samples=10,
+                scheduler=ASHAScheduler(metric="mean_loss", mode="min",
+                search_algo=hyperopt_search),
+            ),
+            param_space=search_space,
+        )
+        results = tuner.fit()
+
+        # Obtain a trial dataframe from all run trials of this `tune.run` call.
+        dfs = {result.path: result.metrics_dataframe for result in results}
+        torch.save(dfs, "./dfs_results.pt") 
+        ax = None  # This plots everything on the same plot
+        for d in dfs.values():
+            ax = d.mean_accuracy.plot(ax=ax, legend=False)
+        
     
     @torch.no_grad()   
     def test_self(self, validation_data: object, loss_function: Callable = torch.nn.MSELoss()):

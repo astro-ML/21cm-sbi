@@ -43,6 +43,9 @@ class Analysis:
         self.NPE = NPEHandler
         self.valdat = Validation_Dataset
         self.device = self.NPE.device
+        # workaround for now
+        self.NPE.density_estimator.zero_grad(set_to_none=True)
+        self.NPE.summary_net.zero_grad(set_to_none=True)
         self.features = len(labels)
         if path == "":
             self.save = False
@@ -73,7 +76,8 @@ class Analysis:
         """
         labs, imgs, _ = self.sampler(num_samples=num_points, sumnet=True)
         for i, (lab, img) in enumerate(zip(labs, imgs)):
-            samples = self.NPE.density_estimator.sample(num_samples_stat, img.unsqueeze(0), self.posterior_kwargs)
+            with torch.no_grad():
+                samples = self.NPE.density_estimator.sample(num_samples_stat, img.unsqueeze(0), self.posterior_kwargs)
             # plot posterior samples
             figure, axis = pairplot(samples = samples.detach().cpu().numpy(), points=lab.detach().cpu().numpy(),
                 limits=[[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],], figsize=(10, 10),
@@ -125,6 +129,7 @@ class Analysis:
         # run sbc on full Validation Dataset
         lengthd = len(self.valdat.dataset)
         info("Run SBC...")
+        batch_size = self.valdat.batch_size
         with alive_bar(len(self.valdat), force_tty=True, refresh_secs=1) as bar:
             with torch.no_grad():
                 for k, (lab, img, rnge) in enumerate(self.valdat):
@@ -136,12 +141,13 @@ class Analysis:
                         dap_samples = torch.empty(ranks.shape)
                     # sbc rank stat
                     for i in range(pred.shape[0]):
-                        samples = self.NPE.density_estimator.sample(x = pred[i].unsqueeze(0), 
+                        with torch.no_grad():
+                            samples = self.NPE.density_estimator.sample(x = pred[i].unsqueeze(0), 
                         num_samples=num_samples,
                         sample_kwargs=self.posterior_kwargs)
-                        dap_samples[k*pred.shape[0] + i] = samples[0].cpu()
+                        dap_samples[k*batch_size + i] = samples[0].cpu()
                         for j in range(pred.shape[1]):
-                            ranks[k*pred.shape[0] + i,j] = (samples[:,j]<lab[i,j]).sum().cpu().item()
+                            ranks[k*batch_size + i,j] = (samples[:,j]<lab[i,j]).sum().cpu().item()
                     bar()
                 
         # plot rank statistics
@@ -223,7 +229,8 @@ class Analysis:
         _,thetas,_ = self.sampler(num_samples=num_points, sumnet=True)
         with alive_bar(num_points, force_tty=True, refresh_secs=1) as bar:
             for i in range(num_points):
-                posterior_samples = self.NPE.density_estimator.sample(num_samples, x=thetas[i],sample_kwargs=self.posterior_kwargs)
+                with torch.no_grad():
+                    posterior_samples = self.NPE.density_estimator.sample(num_samples, x=thetas[i],sample_kwargs=self.posterior_kwargs)
                 likelihood_samples = simulator(posterior_samples)
                 figure, axis = pairplot(samples = likelihood_samples, points=thetas[i],
                 limits=[[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],], figsize=(10, 10),
@@ -245,51 +252,63 @@ class Analysis:
         final = {}
         
         # first check avg. sensitivity for sum_net
-        _, imgs, rnges = self.sampler(num_points, sumnet=False)
-        imgs, rnges = imgs.to(self.device), rnges.to(self.device)
-        if summary_net:
-            # we are interested in how the imgs and rnges change when we change the input
-            
-            imgs.requires_grad = True
-            rnges.requires_grad = True
-            out = self.NPE.summary_net(imgs, rnges)
-            out.mean(0).mean().cpu().backward()
-            
-            if axis == [-1]:
-                axis_imgs = [imgs.dim() - 1]
-                axis_rnges = [rnges.dim() -1]
-            else:
-                axis_imgs = axis
-                axis_rnges = axis
-            axes_to_reduce_imgs = [i for i in range(imgs.dim()) if i not in axis_imgs]
-            axes_to_reduce_rnges = [i for i in range(rnges.dim()) if i not in axis_rnges]
-            
-            
-            final.update({
-                "sensitivity_sum_net_image": torch.mean(torch.abs(imgs.grad), dim=axes_to_reduce_imgs).cpu(),
-                "sensitivity_sum_net_range": torch.mean(torch.abs(rnges.grad), dim=axes_to_reduce_rnges).cpu(),
-            })
-        
-        imgs = out.detach()
-        for i, img in enumerate(imgs):
-            img = img.unsqueeze(0)
-            thetas = self.NPE.density_estimator.sample(num_samples = num_samples,
-                                                        x = img, sample_kwargs=self.posterior_kwargs).detach()
-            img.requires_grad = True
-            res = self.NPE.density_estimator.forward(thetas, img)[1]
-            res.mean(0).mean().cpu().backward()
+        for i, (_, imgs, rnges) in enumerate(self.valdat):
+            if i >= num_points:
+                break
+            imgs, rnges = imgs.to(self.device), rnges.to(self.device)
+            if summary_net:
+                # we are interested in how the imgs and rnges change when we change the input
+                
+                imgs.requires_grad = True
+                rnges.requires_grad = True
+                out = self.NPE.summary_net(imgs, rnges)
+                out.mean(0).mean().backward()
             if i == 0:
                 if axis == [-1]:
-                    axis = [imgs.dim() - 1]
-                axes_to_reduce = [i for i in range(imgs.dim()) if i not in axis]
-                grad = img.grad.mean(dim=axes_to_reduce).unsqueeze(0)
+                    axis_imgs = [imgs.dim() - 1]
+                    axis_rnges = [rnges.dim() -1]
+                else:
+                    axis_imgs = axis
+                    axis_rnges = axis
+                axes_to_reduce_imgs = [i for i in range(imgs.dim()) if i not in axis_imgs]
+                axes_to_reduce_rnges = [i for i in range(rnges.dim()) if i not in axis_rnges]
+
+                sens_sumnet_temp_img = torch.mean(torch.abs(imgs.grad), dim=axes_to_reduce_imgs).detach().cpu().unsqueeze(0)
+                sens_sumnet_temp_rnge = torch.mean(torch.abs(rnges.grad), dim=axes_to_reduce_rnges).detach().cpu().unsqueeze(0)
             else:
-                grad = torch.cat([grad, img.grad.mean(dim=axes_to_reduce).unsqueeze(0)], dim=0)
-        
+                sens_sumnet_temp_img = torch.cat([sens_sumnet_temp_img,
+                                                  torch.mean(torch.abs(imgs.grad), dim=axes_to_reduce_imgs).detach().cpu().unsqueeze(0)],
+                                                 dim=0)
+                sens_sumnet_temp_rnge = torch.cat([sens_sumnet_temp_rnge,
+                                                   torch.mean(torch.abs(rnges.grad), dim=axes_to_reduce_rnges).detach().cpu().unsqueeze(0)],
+                                                  dim=0)
+            
+            imgs = out.detach()
+            for j, img in enumerate(imgs):
+                img = img.unsqueeze(0)
+                with torch.no_grad():
+                    thetas = self.NPE.density_estimator.sample(num_samples = num_samples,
+                                                            x = img, sample_kwargs=self.posterior_kwargs)
+                img.requires_grad = True
+                res = self.NPE.density_estimator.forward(thetas, img)[1]
+                res.mean(0).mean().backward()
+                res = res.cpu()
+                if i == 0 and j == 0:
+                    if axis == [-1]:
+                        axis = [img.dim() - 1]
+                    axes_to_reduce = [i for i in range(img.dim()) if i not in axis]
+                    grad_tmp =  torch.mean(torch.abs(img.grad), dim=axes_to_reduce).detach().cpu().unsqueeze(0)
+                else:
+                    grad_tmp = torch.cat([grad_tmp, torch.mean(torch.abs(img.grad), dim=axes_to_reduce).detach().cpu().unsqueeze(0)], dim=0)
+
+                
+                
         final.update({
-            "sensitivity_density_net_logprob": torch.mean(torch.abs(grad), dim=0).cpu()
+            "sensitivity_sum_net_image": torch.mean(sens_sumnet_temp_img, dim=0).cpu(),
+            "sensitivity_sum_net_range": torch.mean(sens_sumnet_temp_rnge, dim=0).cpu(),
+            "sensitivity_density_net_logprob": torch.mean(grad_tmp, dim=0).cpu()
         })
-        self.append_result(final) 
+        self.append_result(final)
         torch.cuda.empty_cache()
         return final
         
@@ -343,8 +362,8 @@ class Analysis:
         self._gradients_are_normed = norm_gradients_to_prior
         
         def comp_eig(x, num_samples):
-
-            thetas = self.NPE.density_estimator.sample(num_samples = num_samples,
+            with torch.no_grad():
+                thetas = self.NPE.density_estimator.sample(num_samples = num_samples,
                                                         x = x, sample_kwargs=self.posterior_kwargs).detach()
             thetas.requires_grad = True
 
@@ -420,7 +439,8 @@ class Analysis:
         lab, img, _ = self.sampler(num_samples=num_points, sumnet=True)
             
         for i in range(num_points):
-            sample = self.NPE.density_estimator.sample(num_samples=num_samples, x=img[i], sample_kwargs=self.posterior_kwargs).unsqueeze(1).detach().cpu()
+            with torch.no_grad():
+                sample = self.NPE.density_estimator.sample(num_samples=num_samples, x=img[i], sample_kwargs=self.posterior_kwargs).unsqueeze(1).detach().cpu()
             if i == 0:
                 samples = sample
             else:
@@ -505,13 +525,13 @@ class Analysis:
     def person_coeff_conditionals(self, num_points: int = 32, num_samples_stat = 200):
         _,prior_samples,_ = self.sampler(num_samples=num_points, sumnet=True)
         self.NPE.density_estimator._device = self.device
-
-        corrcoef = conditional_corrcoeff(
-            density=self.NPE.density_estimator,
-            limits=torch.tensor([[1e-4,1-1e-4]]*6,device=self.device),
-            condition = prior_samples,resolution=num_samples_stat
-            
-        )
+        with torch.no_grad():
+            corrcoef = conditional_corrcoeff(
+                density=self.NPE.density_estimator,
+                limits=torch.tensor([[1e-4,1-1e-4]]*6,device=self.device),
+                condition = prior_samples,resolution=num_samples_stat
+                
+            ).cpu()
         self.append_result({"person_coeff_conditional": corrcoef})
 
         plt.figure(figsize=(8, 6))

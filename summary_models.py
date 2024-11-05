@@ -385,10 +385,11 @@ class Summary_net_lc_benedikt(nn.Module):
 # linear_conv_stack_z: .037
 # linear_conv_stack_z with max first: .038
 class Summary_net_1dps(nn.Module):
-    def __init__(self):
-        super().__init__(z_slices: int = 10,
-                         cond_size: int = 2,
-                         feature_size: int = 6)
+    def __init__(self,
+                 z_slices: int = 10,
+                 cond_size: int = 2,
+                 feature_size: int = 6):
+        super().__init__()
         
         self.conditioning1 = nn.Sequential(
             nn.Linear(cond_size,feature_size),
@@ -426,7 +427,7 @@ class Summary_net_1dps(nn.Module):
         )
 
     def forward(self, x, cond=None):
-        if self.cond is not None:
+        if cond is not None:
             cond = self.conditioning1(cond)
             a1, a2, a3, b1, b2, b3 = cond.T.unsqueeze(-1).unsqueeze(-1)
         else:
