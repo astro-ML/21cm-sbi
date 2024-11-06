@@ -84,7 +84,7 @@ class SumnetHandler():
                 self.Model.train()
                 for lab, img, rnge in training_data:
                     img, lab, rnge = img.to(self.device), lab.to(self.device), rnge.to(self.device)
-                    x = self.Model(img)
+                    x = self.Model(img,rnge)
                     loss = self.lossf(lab, x)
                     loss.backward()
                     self.optimizer.step()

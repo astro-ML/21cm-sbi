@@ -572,12 +572,12 @@ class Analysis:
                     labels, images, ranges = lab, img, rnge
                 else:
                     labels = torch.cat([labels,lab], dim=0)
+                    if sumnet:
+                        with torch.no_grad():
+                            img = self.NPE.summary_net(images.to(self.device), ranges.to(self.device)).cpu()
                     images = torch.cat([images, img], dim=0)
                     ranges = torch.cat([ranges,rnge],dim=0)
                 if labels.shape[0] >= num_samples:
-                    if sumnet:
-                        with torch.no_grad():
-                            images = self.NPE.summary_net(images.to(self.device), ranges.to(self.device)).cpu()
                     return labels[:num_samples], images[:num_samples], ranges[:num_samples]
                 
             
