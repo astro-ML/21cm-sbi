@@ -536,7 +536,7 @@ class Analysis:
 
         plt.figure(figsize=(8, 6))
         sns.heatmap(corrcoef, annot=True, cmap='coolwarm', vmin=-1, vmax=1, xticklabels=self.labels, yticklabels=self.labels)
-        plt.title("Marginal Pearson correlation coefficients")
+        plt.title("Conditional Pearson correlation coefficients")
         if self.save:
             plt.savefig(self.path + self.filename + "_conditional_correlcoeff.png", dpi=320)
         else:

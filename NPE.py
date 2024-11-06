@@ -32,9 +32,29 @@ class NPEHandler():
         
         info("Succesfully initialized NPEHandler")
 
-    def train(self, training_data: object, test_data: object, epochs: int = 20, freezed_epochs: int = 0, pretrain_epochs: int = 0, optimizer = torch.optim.Adam,
-              optimizer_kwargs: dict = {"lr": 1e-4}, loss_function: Callable = torch.nn.MSELoss, loss_params: dict = {}, device: str = None, plot: bool = True,
+    def train(self, config: dict, training_data: object, test_data: object, epochs: int = 20, freezed_epochs: int = 0, pretrain_epochs: int = 0, optimizer = torch.optim.Adam,
+              loss_function: Callable = torch.nn.MSELoss, loss_params: dict = {}, device: str = None, plot: bool = True,
               grad_clip: float = 0, lossfile: str = ""):
+        """_summary_
+
+        Args:
+            config (dict): _description_
+            test_data (object): _description_
+            training_data (object, optional): _description_. Defaults to None.
+            epochs (int, optional): _description_. Defaults to 20.
+            freezed_epochs (int, optional): _description_. Defaults to 0.
+            pretrain_epochs (int, optional): _description_. Defaults to 0.
+            optimizer (_type_, optional): _description_. Defaults to torch.optim.Adam.
+            loss_function (Callable, optional): _description_. Defaults to torch.nn.MSELoss.
+            loss_params (dict, optional): _description_. Defaults to {}.
+            device (str, optional): _description_. Defaults to None.
+            plot (bool, optional): _description_. Defaults to True.
+            grad_clip (float, optional): _description_. Defaults to 0.
+            lossfile (str, optional): _description_. Defaults to "".
+
+        Returns:
+            _type_: _description_
+        """
         
         # set bool for gradient clipping
         if grad_clip > 0:
@@ -75,10 +95,10 @@ class NPEHandler():
                 # initialize optimizer
                 if self.sum_net and epoch == freezed_epochs:
                     info("Initialize optimizer for joint training...")
-                    self.optimizer = optimizer(list(self.density_estimator.parameters()) + list(self.summary_net.parameters()), **optimizer_kwargs)
+                    self.optimizer = optimizer(list(self.density_estimator.parameters()) + list(self.summary_net.parameters()),)
                 if not self.sum_net or ( epoch == 0 and epoch < freezed_epochs):
                     info("Initialize optimizer for density estimator training with freezed summary...")
-                    self.optimizer = optimizer(self.density_estimator.parameters(), **optimizer_kwargs)
+                    self.optimizer = optimizer(self.density_estimator.parameters(),  lr = config['lr'])
                 
                 self.density_estimator.train()
                 if self.sum_net and epoch < freezed_epochs:
@@ -124,7 +144,7 @@ class NPEHandler():
                 if self.opti_hype:
                     with tempfile.TemporaryDirectory() as temp_checkpoint_dir:
                         checkpoint = None
-                        if (i + 1) % 5 == 0:
+                        if (epoch + 1) % 5 == 0:
                             # This saves the model to the trial directory
                             torch.save(
                                 self.density_estimator.state_dict(),
@@ -133,7 +153,7 @@ class NPEHandler():
                             checkpoint = Checkpoint.from_directory(temp_checkpoint_dir)
 
                         # Send the current training result back to Tune
-                        train.report({"mean_loss": test_loss_de_tmp}, checkpoint=checkpoint)
+                        train.report({"loss": test_loss_de_tmp}, checkpoint=checkpoint)
                     
                 bar()
                 
@@ -159,10 +179,11 @@ class NPEHandler():
             if lossfile == "": plt.show()
             else: plt.savefig(f"./{lossfile}.png", dpi=400)
             plt.clf()
-        return {"trainloss": train_loss_de, 
-        "testloss": test_loss_de}
+        else:
+            return {"trainloss": train_loss_de,
+            "testloss": test_loss_de}
     
-    def grid_search(self, search_space: dict, training_data: object, test_data: object, train_kwargs: dict = {}):
+    def opti_params(self, search_space: dict, training_data: object, test_data: object, train_kwargs: dict = {}):
         """Perform a grid search using Baysian optimization.
 
         Args:
@@ -176,17 +197,17 @@ class NPEHandler():
             test_data (object): Torch dataloader containing the testdata
             train_kwargs (dict, optional): Addition parameter passed to the training function. Defaults to {}.
         """
-        hyperopt_search = HyperOptSearch(search_space, metric="mean_loss", mode="min")
-        tuner = tune.Tuner(
+        
+        self.opti_hype = True
+        hyperopt_search = HyperOptSearch(search_space, metric="loss", mode="min")
+        results = tune.run(
             tune.with_parameters(self.train, training_data=training_data, test_data=test_data, **train_kwargs),
-            tune_config=tune.TuneConfig(
-                num_samples=10,
-                scheduler=ASHAScheduler(metric="mean_loss", mode="min",
-                search_algo=hyperopt_search),
-            ),
-            param_space=search_space,
+            num_samples=10,
+            scheduler=ASHAScheduler(metric="loss", mode="min"),
+            search_alg=hyperopt_search,
+            resources_per_trial={"GPU": 1},
         )
-        results = tuner.fit()
+        #results = tuner.fit()
 
         # Obtain a trial dataframe from all run trials of this `tune.run` call.
         dfs = {result.path: result.metrics_dataframe for result in results}
@@ -208,7 +229,7 @@ class NPEHandler():
             lab, img, rnge = lab.to(self.device), img.to(self.device), rnge.to(self.device)
             loss, _test_loss_sn = self._loss(img, lab, rnge, 0, 1, loss_function)
             test_loss_sn_tmp += _test_loss_sn
-            test_loss_de_tmp += loss.mean().item() 
+            test_loss_de_tmp += loss.mean().item()
         return test_loss_de_tmp / len(validation_data), test_loss_sn_tmp / len(validation_data)
 
 

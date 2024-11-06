@@ -84,7 +84,7 @@ class SumnetHandler():
                 self.Model.train()
                 for lab, img, rnge in training_data:
                     img, lab, rnge = img.to(self.device), lab.to(self.device), rnge.to(self.device)
-                    x = self.Model(img, rnge)
+                    x = self.Model(img)
                     loss = self.lossf(lab, x)
                     loss.backward()
                     self.optimizer.step()
@@ -140,10 +140,10 @@ class SumnetHandler():
         test_idx = np.random.randint(0, len(Validation_data), num_samples)
         test_loss = []
         with torch.no_grad():
-            for lab, img, _ in Validation_data:
+            for lab, img, rnge in Validation_data:
                 if num_samples > 0:
-                    img, lab = img.to(device), lab.to('cpu')
-                    pred = Model(img).to('cpu')
+                    img, lab, rnge = img.to(device), lab.to('cpu'), rnge.to('cpu')
+                    pred = Model(img, rnge).to('cpu')
                     print(f'loss: ' + str(lossf(denormalize(pred), denormalize(lab)).item()) + '\n',
                         f'pred: ' + str(denormalize(pred.to('cpu'))) + '\n',
                         f'truth: ' + str(denormalize(lab.to('cpu'))))

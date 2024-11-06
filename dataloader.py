@@ -92,14 +92,10 @@ class DataHandler():
     def normalize(self, labels: torch.FloatTensor, images: torch.FloatTensor = None, 
                   epsilon: float = 1e-4) -> tuple[torch.FloatTensor, ...]:
         if images is not None:
-            if self.psvar:
-                amp = torch.max(images, dim=-1, keepdim=True)[0]
             #print(f'{images.shape}')
             diff = images.max() - images.min()
             # normalize to [0,1]
             if diff != 0: images = (images - images.min()) / diff
-            if self.psvar:
-                images = torch.cat((images, amp), dim=-1)
             # normalize to [0 + epsilon, 1 - epsilon]
         labels = (labels - self.norm_range[:,0] + epsilon) / (self.norm_range[:,1] - self.norm_range[:,0] + 2*epsilon)
         return (images, labels)
