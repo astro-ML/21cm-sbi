@@ -570,7 +570,7 @@ class Analysis:
             for i, (lab, img, rnge) in enumerate(self.valdat):
                 if sumnet:
                     with torch.no_grad():
-                        img = self.NPE.summary_net(images.to(self.device), ranges.to(self.device)).cpu()
+                        img = self.NPE.summary_net(img.to(self.device), rnge.to(self.device)).cpu()
                 if i == 0:
                     labels, images, ranges = lab, img, rnge
                 else:
