@@ -18,7 +18,7 @@ from sbi.inference.potentials.ratio_based_potential import RatioBasedPotential
 from sbi.inference.potentials.likelihood_based_potential import LikelihoodBasedPotential
 from sbi.inference.posteriors.vi_posterior import VIPosterior
 from sbi.utils import mcmc_transform
-from py21cmfast_tools import calculate_psQ
+from py21cmfast_tools import calculate_ps
 from powerbox.tools import ignore_zero_absk
 
 def cutoff_to_z(redshift_cutoff: float, path: str, prefix: str = "") -> None:
