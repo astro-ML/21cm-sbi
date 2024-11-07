@@ -568,20 +568,14 @@ class Analysis:
             if num_samples > self.valdat.batch_size * len(self.valdat):
                 raise ValueError("Number of samples larger than available data.")
             for i, (lab, img, rnge) in enumerate(self.valdat):
+                if sumnet:
+                    with torch.no_grad():
+                        img = self.NPE.summary_net(images.to(self.device), ranges.to(self.device)).cpu()
                 if i == 0:
                     labels, images, ranges = lab, img, rnge
                 else:
                     labels = torch.cat([labels,lab], dim=0)
-                    if sumnet:
-                        with torch.no_grad():
-                            img = self.NPE.summary_net(images.to(self.device), ranges.to(self.device)).cpu()
                     images = torch.cat([images, img], dim=0)
                     ranges = torch.cat([ranges,rnge],dim=0)
                 if labels.shape[0] >= num_samples:
                     return labels[:num_samples], images[:num_samples], ranges[:num_samples]
-                
-            
-
-
-            
-        
