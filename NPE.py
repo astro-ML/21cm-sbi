@@ -177,7 +177,7 @@ class NPEHandler():
             plt.title("Log loss during training")
             plt.legend()
             if lossfile == "": plt.show()
-            else: plt.savefig(f"./{lossfile}.png", dpi=400)
+            else: plt.savefig(f"{lossfile}.png", dpi=400)
             plt.clf()
         else:
             return {"trainloss": train_loss_de,

@@ -73,7 +73,7 @@ class SumnetHandler():
     
     def train(self, epochs: int,  training_data: object, test_data: object,
               optimizer: object, optimizer_kwargs: dict = {},
-            lossf: Callable = nn.MSELoss(), plot: bool = True):
+            lossf: Callable = nn.MSELoss(), plot_label: str = ""):
         self.lossf = lossf
         self.optimizer = optimizer
 
@@ -93,7 +93,7 @@ class SumnetHandler():
 
                 losstest.append(self.test_self(test_data))
                 bbar()
-        if plot:
+        if plot_label == "":
             plt.plot(np.linspace(0, epochs, len(losstrain)), losstrain, label='Trainingsloss', alpha=0.5)
             plt.plot(np.linspace(0, epochs, len(losstest)), losstest, label='Testloss')
             plt.xlabel("epochs")
@@ -101,7 +101,7 @@ class SumnetHandler():
             #plt.yscale('log')
             #plt.xticks(np.linspace(0,epochs*lentrain,10, dtype=int), np.linspace(0,epochs,10, dtype=int))
             plt.legend()
-            plt.savefig("./run.png", dpi=400)
+            plt.savefig(f"{plot_label}.png", dpi=400)
             plt.show()
             plt.clf()
         return {"trainloss": losstrain,

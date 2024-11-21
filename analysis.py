@@ -75,7 +75,7 @@ class Analysis:
             sample_kwargs (dict, optional): _description_. Defaults to { 'sample_with' :'rejection',}.
         """
         labs, imgs, _ = self.sampler(num_samples=num_points, sumnet=True)
-        for i, (lab, img) in enumerate(zip(labs, imgs)):
+        for (i, lab, img) in zip(range(num_points), labs, imgs):
             with torch.no_grad():
                 samples = self.NPE.density_estimator.sample(num_samples_stat, img.unsqueeze(0), self.posterior_kwargs)
             # plot posterior samples
