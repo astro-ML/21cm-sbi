@@ -114,6 +114,8 @@ class Analysis:
             if self.save:
                 figure.savefig(self.path + f"{self.filename}_marginal_{i}.png", dpi=300)
             else: figure.show()
+        self.NPE.density_estimator._device = self.device
+        self.NPE.density_estimator.to(self.device)
         torch.cuda.empty_cache()
 
 
