@@ -288,5 +288,7 @@ class MAF(nn.Module):
 
     def loss(self, x, cond=None):
         u, sum_log_abs_det_jacobians = self.forward(x, cond)
+        print(u.shape, sum_log_abs_det_jacobians.shape)
+        print(u, sum_log_abs_det_jacobians)
         #print("base_dist: ", self.base_dist.log_prob(u).mean().item(), "jac: ", sum_log_abs_det_jacobians.mean().detach().item())
         return - torch.sum(self.base_dist.log_prob(u) + sum_log_abs_det_jacobians, dim=1)

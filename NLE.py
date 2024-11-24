@@ -114,6 +114,10 @@ class NLEHandler(NPEHandler):
                 # testing loop
                 test_loss_de_tmp, test_loss_sn_tmp = self.test_self(test_data, epoch, freezed_epochs, loss_sn)
                 # save losses for plot
+                #print("train_sumnet: ", train_loss_sn_tmp / len(training_data))
+                #print("test_sumnet: ", test_loss_sn_tmp)
+                #print("train_de: ", train_loss_de_tmp / len(training_data))
+                #print("test_de: ", test_loss_de_tmp)
                 train_loss_de.append(train_loss_de_tmp / len(training_data))
                 test_loss_de.append(test_loss_de_tmp)
                 if self.sum_net:
@@ -163,10 +167,10 @@ class NLEHandler(NPEHandler):
         if self.sum_net:
             if epoch < freezed_epochs:
                 summary = self.summary_net(img, rnge).detach()
-                train_loss_sn_tmp = loss_function(summary, lab).mean().item()
+                train_loss_sn_tmp = loss_function(summary, lab).mean(0).mean().item()
             else:
                 summary = self.summary_net(img, rnge)
-                train_loss_sn_tmp = loss_function(summary, lab).mean().item()
+                train_loss_sn_tmp = loss_function(summary, lab).mean(0).mean().item()
             
             
         else:
