@@ -90,8 +90,10 @@ class RNVP(nn.Module):
         elif len(xshape) > 3:
             raise ValueError(f"Shape of x is {x.shape} but is expected to be (sample_shape, batch_shape, event_shape) or (batch_shape, event_shape)") 
         # only there to handle weird sbi package stuff
-        
-        z, jac = self.net(x, c=[condition], rev=False)
+        if condition is not None:
+            z, jac = self.net(x, c=[condition], rev=False)
+        else:
+            z, jac = self.net(x, rev=False)
         p = 0.5*torch.sum(z**2,1) - jac
         
         if len(xshape) > 2:

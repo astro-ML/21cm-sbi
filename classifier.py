@@ -154,7 +154,7 @@ class ResNet(nn.Module):
         self.posterior = posterior
             
 
-    def sample(self, num_samples, x, sample_kwargs = None):
+    def sample(self, num_samples, x):
         return self.posterior.sample((num_samples,), x, show_progress_bars=False)    
         
 

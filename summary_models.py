@@ -1,6 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import FrEIA.framework as Ff
+import FrEIA.modules as Fm
+
+
         
 
 class Summary_net_lc(nn.Module):
@@ -384,76 +388,166 @@ class Summary_net_lc_benedikt(nn.Module):
 # more_params with add linear: .036
 # linear_conv_stack_z: .037
 # linear_conv_stack_z with max first: .038
-class Summary_net_1dps(nn.Module):
-    def __init__(self,
-                 z_slices: int = 10,
-                 cond_size: int = 2,
-                 feature_size: int = 6):
+
+class cConv1d(nn.Module):
+    def __init__(self, in_channels, out_channels, layers, kernel_size, stride, padding, bias=True):
         super().__init__()
         
-        self.conditioning1 = nn.Sequential(
-            nn.Linear(cond_size,feature_size),
-            nn.Tanh()
-        )
+        self.layers = layers
+        
+        for i in range(layers-1):
+            setattr(self, f'conv{i}', nn.Conv1d(in_channels, out_channels, kernel_size, stride, padding, bias=bias))
+            setattr(self, f'bn{i}', nn.BatchNorm1d(out_channels))
+            setattr(self, f'relu{i}', nn.GELU())
+            setattr(self, f'cond{i}', nn.Sequential(nn.Linear(2, in_channels), nn.Tanh()))
+            in_channels = out_channels
+        setattr(self, f'cond{layers-1}', nn.Sequential(nn.Linear(2, in_channels), nn.Tanh()))
+        setattr(self, f'conv{layers-1}', nn.Conv1d(in_channels, out_channels, kernel_size, stride, padding, bias=bias))
+        setattr(self, f'bn{layers-1}', nn.BatchNorm1d(out_channels))
+        setattr(self, f'relu{layers-1}', nn.GELU())
 
-        self.conv1 = nn.Conv1d(z_slices, 20, 3, padding=1)
+    
+    def forward(self, x, cond):
+        
+        
+        for i in range(self.layers):
+            x = x*getattr(self, f'cond{i}')(cond).unsqueeze(-1)
+            x = getattr(self, f'conv{i}')(x)
+            x = getattr(self, f'bn{i}')(x)
+            x = getattr(self, f'relu{i}')(x)
+        
+        return x
+
+class Summary_net_1dps(nn.Module):
+    def __init__(self,
+                 layer_per_block1 = 2,
+                 layersize1 = 32,
+                 filter_size1 = 3,
+                 layer_per_block2 = 2,
+                 layersize2 = 32,
+                 filter_size2 = 3,
+                 layer_per_block3 = 2,
+                 layersize3 = 32,
+                 filter_size3 = 3,):
+        super().__init__()
+        
+        self.conv1 = cConv1d(10, layersize1, layer_per_block1, filter_size1, 1, int(filter_size1/2))
         self.pool1 = nn.MaxPool1d(2)
-        self.activation1 = nn.GELU()
-        self.bn1 = nn.BatchNorm1d(20)
-
-        self.conv2 = nn.Conv1d(20, 25, 3, padding=1)
+        self.conv2 = cConv1d(layersize1, layersize2, layer_per_block2, filter_size2,1, int(filter_size2/2))
         self.pool2 = nn.MaxPool1d(2)
-        self.activation2 = nn.GELU()
-        self.bn2 = nn.BatchNorm1d(25)
-
-        self.conv3 = nn.Conv1d(25, 30, 3, padding=1)
+        self.conv3 = cConv1d(layersize2, layersize3, layer_per_block3, filter_size3,1, int(filter_size3/2))
         self.pool3 = nn.MaxPool1d(2)
-        self.activation3 = nn.GELU()
-        self.bn3 = nn.BatchNorm1d(30)
 
         self.flatten = nn.Flatten()
 
         self.linear_stack = nn.Sequential(
-            nn.Linear(30,20),
+            nn.Linear(layersize3,32),
             nn.Dropout(0.1),
             nn.GELU(),
-            nn.Linear(20,15),
+            nn.Linear(32,16),
             nn.Dropout(0.1),
             nn.GELU(),
-            nn.Linear(15,10),
+            nn.Linear(16,8),
             nn.GELU(),
-            nn.Linear(10,6),
+            nn.Linear(8,6),
             nn.Sigmoid()
         )
 
-    def forward(self, x, cond=None):
-        if cond is not None:
-            cond = self.conditioning1(cond)
-            a1, a2, a3, b1, b2, b3 = cond.T.unsqueeze(-1).unsqueeze(-1)
-        else:
-            a1, a2, a3, b1, b2, b3 = [1,1,1,0,0,0]
-
-        x = self.conv1(x)*a1 + b1
+    def forward(self, x, cond=None): 
+        x = self.conv1(x,cond)
         x = self.pool1(x)
-        x = self.activation1(x)
-        x = self.bn1(x)
 
-        x = self.conv2(x)*a2 + b2
+        x = self.conv2(x, cond)
         x = self.pool2(x)
-        x = self.activation2(x)
-        x = self.bn2(x)
 
-        x = self.conv3(x)*a3 + b3
+        x = self.conv3(x, cond)
         x = self.pool3(x)
-        x = self.activation3(x)
-        x = self.bn3(x)
+
 
         x = self.flatten(x)
-        #x = x.unsqueeze(-2)
-        #x = self.linear_conv_stack_z(x)
-        #x = self.flatten(x)
         x = self.linear_stack(x)
         return x
+    
+    
+class Summary_net_1dps_det(nn.Module):
+    def __init__(self,
+                    z_slices: int = 10,
+                    cond_size: int = 2):
+        super().__init__()
+        
+        self.z_slices = z_slices
+        
+        
+        def subnet_fc(c_in, c_out):
+            return nn.Sequential(nn.Linear(c_in, 256), nn.GELU(),
+                                nn.Linear(256,  c_out), nn.BatchNorm1d(c_out))
+
+        def subnet_conv(c_in, c_out):
+            return nn.Sequential(nn.Conv1d(c_in, 256,   3, padding=1), nn.GELU(),
+                                nn.Conv1d(256,  c_out, 3, padding=1))
+
+        def subnet_conv_1x1(c_in, c_out):
+            return nn.Sequential(nn.Conv1d(c_in, 256,   1), nn.GELU(),
+                                nn.Conv1d(256,  c_out, 1))
+            
+        self.down = nn.AvgPool1d(2)
+    
+        self.mlp1 = Ff.SequenceINN(80)
+        self.mlp1.append(Fm.AllInOneBlock, subnet_constructor=subnet_fc, permute_soft=True)
+        
+        self.mlp2 = Ff.SequenceINN(40)
+        self.mlp2.append(Fm.AllInOneBlock, subnet_constructor=subnet_fc, permute_soft=True)
+        
+        self.mlp3 = Ff.SequenceINN(20)
+        self.mlp3.append(Fm.AllInOneBlock, subnet_constructor=subnet_fc, permute_soft=True)
+        
+        self.mlp4 = Ff.SequenceINN(10)
+        self.mlp4.append(Fm.AllInOneBlock, subnet_constructor=subnet_fc, permute_soft=True)
+        
+        self.mlp5 = Ff.SequenceINN(8)
+        self.mlp5.append(Fm.AllInOneBlock, subnet_constructor=subnet_fc, permute_soft=True)
+        
+        self.mlp6 = Ff.SequenceINN(6)
+        self.mlp6.append(Fm.AllInOneBlock, subnet_constructor=subnet_fc, permute_soft=True)
+
+        self.flatten = nn.Flatten()
+        
+        self.out = nn.Sigmoid()
+
+
+    def forward(self, x, cond=None):
+        loss = 0
+    
+        x = x.flatten(1)
+        x, det = self.mlp1(x)
+        loss += 0.5*torch.sum(x**2, 1) - det
+        
+        x = self.down(x)
+        x, det = self.mlp2(x)
+        loss += 0.5*torch.sum(x**2, 1) - det
+        
+        x = self.down(x)
+        x, det = self.mlp3(x)
+        loss += 0.5*torch.sum(x**2, 1) - det
+        
+        x = self.down(x)
+        x, det = self.mlp4(x)
+        loss += 0.5*torch.sum(x**2, 1) - det
+        
+        x = x[:, :-2] * x[:, -1].unsqueeze(-1) + x[:, -2].unsqueeze(-1)
+        
+        x, det = self.mlp5(x)
+        loss += 0.5*torch.sum(x**2, 1) - det
+        
+        x = x[:, :-2] * x[:, -1].unsqueeze(-1) + x[:, -2].unsqueeze(-1)
+        
+        x, det = self.mlp6(x)
+        
+        x = self.out(x)
+        
+        loss += 0.5*torch.sum(x**2, 1) - det
+        
+        return x, loss
 
 class Summary_net_2dps(nn.Module):
     def __init__(self):

@@ -19,7 +19,8 @@ from torch import Tensor
 
 
 class Analysis:
-    def __init__(self, NPEHandler, 
+    def __init__(self, 
+                 Trainer,
                 Validation_Dataset,
                 filename: str = "",
                 path: str = "",
@@ -40,12 +41,12 @@ class Analysis:
             labels (list, optional): _description_. Defaults to [r"{WDM}$", r"$\Omega_m$", r"$", r"$", r"{vir, ion}$", r"$\zeta$"].
             transform (bool, optional): _description_. Defaults to False.
         """
-        self.NPE = NPEHandler
+        self.trainer = Trainer
         self.valdat = Validation_Dataset
-        self.device = self.NPE.device
+        self.device = Trainer.device
         # workaround for now
-        self.NPE.density_estimator.zero_grad(set_to_none=True)
-        self.NPE.summary_net.zero_grad(set_to_none=True)
+        self.trainer.de_net.density_estimator.zero_grad(set_to_none=True)
+        self.trainer.sn_net.summary_net.zero_grad(set_to_none=True)
         self.features = len(labels)
         if path == "":
             self.save = False
@@ -56,14 +57,17 @@ class Analysis:
         if prior is None:
             self.prior = BoxUniform(torch.zeros(self.features) + epsilon, torch.ones(self.features) - epsilon, device=self.device)
         else: self.prior = prior
-        self.potential, _ = posterior_estimator_based_potential(posterior_estimator=self.NPE.density_estimator,
-                        prior = self.prior, enable_transform=transform,x_o = None)
-        self.transform = transform
+        #self.potential, _ = posterior_estimator_based_potential(posterior_estimator=self.trainer.de_net,
+        #                prior = self.prior, enable_transform=transform,x_o = None)
+        #self.transform = transform
         if self.save:
             with open(path + filename + "_results.json", 'w') as f:
                 json.dump({}, f, indent=4)
         self.labels = labels
         self.posterior_kwargs = posterior_kwargs
+        
+        self.trainer.de_net.eval()
+        self.trainer.sn_net.eval()
 
     def marginals(self, num_points: int = 3,
                 num_samples_stat: int = 10000,):
@@ -77,7 +81,8 @@ class Analysis:
         labs, imgs, _ = self.sampler(num_samples=num_points, sumnet=True)
         for (i, lab, img) in zip(range(num_points), labs, imgs):
             with torch.no_grad():
-                samples = self.NPE.density_estimator.sample(num_samples_stat, img.unsqueeze(0), self.posterior_kwargs)
+                print(img.shape)
+                samples = self.trainer.de_net.sample(num_samples_stat, img.unsqueeze(0), self.posterior_kwargs)
             # plot posterior samples
             figure, axis = pairplot(samples = samples.detach().cpu().numpy(), points=lab.detach().cpu().numpy(),
                 limits=[[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],], figsize=(10, 10),
@@ -98,13 +103,13 @@ class Analysis:
             num_samples_state (int, optional): _description_. Defaults to 10000.
             sample_kwargs (dict, optional): _description_. Defaults to { 'sample_with' :'rejection',}.
         """
-        self.NPE.density_estimator._device = 'cpu'
-        self.NPE.density_estimator.to('cpu')
+        self.trainer.de_net._device = 'cpu'
+        self.trainer.de_net.to('cpu')
         labs, imgs, _ = self.sampler(num_samples=num_points, sumnet=True)
         for (i, lab, img) in zip(range(num_points), labs, imgs):
             with torch.no_grad():
                 figure, axis = conditional_pairplot(
-                    density=self.NPE.density_estimator,
+                    density=self.trainer.de_net,
                     condition=img.unsqueeze(0),
                     limits=[[0, 1]]*6, figsize=(10, 10),
                     labels = self.labels,
@@ -114,18 +119,13 @@ class Analysis:
             if self.save:
                 figure.savefig(self.path + f"{self.filename}_marginal_{i}.png", dpi=300)
             else: figure.show()
-        self.NPE.density_estimator._device = self.device
-        self.NPE.density_estimator.to(self.device)
+        self.trainer.de_net._device = self.device
+        self.trainer.de_net.to(self.device)
         torch.cuda.empty_cache()
 
 
 
     def run_sbc(self, num_samples: int = 1000,):
-        self.NPE.density_estimator.eval()
-        self.NPE.density_estimator.to(self.device)
-        if self.NPE.sum_net:
-            self.NPE.summary_net.eval()
-            self.NPE.summary_net.to(self.NPE.device)
         
         #mp = True if num_workers > 1 else False
         # run sbc on full Validation Dataset
@@ -137,14 +137,14 @@ class Analysis:
                 for k, (lab, img, rnge) in enumerate(self.valdat):
                     img, lab, rnge = img.to(self.device), lab.to(self.device), rnge.to(self.device)
 
-                    pred = self.NPE.summary_net(img, rnge)
+                    pred = self.trainer.sn_net(img, rnge)
                     if k == 0:
                         ranks = torch.empty((lengthd, *pred.shape[1:]))
                         dap_samples = torch.empty(ranks.shape)
                     # sbc rank stat
                     for i in range(pred.shape[0]):
                         with torch.no_grad():
-                            samples = self.NPE.density_estimator.sample(x = pred[i].unsqueeze(0), 
+                            samples = self.trainer.de_net.sample(x = pred[i].unsqueeze(0), 
                         num_samples=num_samples,
                         sample_kwargs=self.posterior_kwargs)
                         dap_samples[k*batch_size + i] = samples[0].cpu()
@@ -232,7 +232,7 @@ class Analysis:
         with alive_bar(num_points, force_tty=True, refresh_secs=1) as bar:
             for i in range(num_points):
                 with torch.no_grad():
-                    posterior_samples = self.NPE.density_estimator.sample(num_samples, x=thetas[i],sample_kwargs=self.posterior_kwargs)
+                    posterior_samples = self.trainer.de_net.sample(num_samples, x=thetas[i],sample_kwargs=self.posterior_kwargs)
                 likelihood_samples = simulator(posterior_samples)
                 figure, axis = pairplot(samples = likelihood_samples, points=thetas[i],
                 limits=[[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],[0, 1],], figsize=(10, 10),
@@ -263,7 +263,7 @@ class Analysis:
                 
                 imgs.requires_grad = True
                 rnges.requires_grad = True
-                out = self.NPE.summary_net(imgs, rnges)
+                out = self.trainer.sn_net(imgs, rnges)
                 out.mean(0).mean().backward()
             if i == 0:
                 if axis == [-1]:
@@ -289,10 +289,10 @@ class Analysis:
             for j, img in enumerate(imgs):
                 img = img.unsqueeze(0)
                 with torch.no_grad():
-                    thetas = self.NPE.density_estimator.sample(num_samples = num_samples,
+                    thetas = self.trainer.de_net.sample(num_samples = num_samples,
                                                             x = img, sample_kwargs=self.posterior_kwargs)
                 img.requires_grad = True
-                res = self.NPE.density_estimator.forward(thetas, img)[1]
+                res = self.trainer.de_net.forward(thetas, img.repeat(thetas.shape[0],1))[0]
                 res.mean(0).mean().backward()
                 res = res.cpu()
                 if i == 0 and j == 0:
@@ -365,7 +365,7 @@ class Analysis:
         
         def comp_eig(x, num_samples):
             with torch.no_grad():
-                thetas = self.NPE.density_estimator.sample(num_samples = num_samples,
+                thetas = self.trainer.de_net.sample(num_samples = num_samples,
                                                         x = x, sample_kwargs=self.posterior_kwargs).detach()
             thetas.requires_grad = True
 
@@ -442,7 +442,7 @@ class Analysis:
             
         for i in range(num_points):
             with torch.no_grad():
-                sample = self.NPE.density_estimator.sample(num_samples=num_samples, x=img[i], sample_kwargs=self.posterior_kwargs).unsqueeze(1).detach().cpu()
+                sample = self.trainer.de_net.sample(num_samples=num_samples, x=img[i], sample_kwargs=self.posterior_kwargs).unsqueeze(1).detach().cpu()
             if i == 0:
                 samples = sample
             else:
@@ -503,15 +503,13 @@ class Analysis:
             for i, psamp in enumerate(prior_samples):
                 psamp.to(self.device)
                 with torch.no_grad():
-                    samples = self.NPE.density_estimator.sample(num_samples_stat, psamp.unsqueeze(0), sample_kwargs = self.posterior_kwargs).cpu()
+                    samples = self.trainer.de_net.sample(num_samples_stat, psamp.unsqueeze(0), sample_kwargs = self.posterior_kwargs).cpu()
                 if i == 0:
                     corrcoef = torch.corrcoef(samples.T).unsqueeze(0)
                 else:
                     corrcoef = torch.cat([corrcoef, torch.corrcoef(samples.T).unsqueeze(0)], dim=0)
                 bar()
-            print(corrcoef.shape)
             corrcoef = corrcoef.mean(dim=0)
-            print(corrcoef.shape)
             self.append_result({"person_coeff_marginal": corrcoef})
 
             plt.figure(figsize=(8, 6))
@@ -526,10 +524,10 @@ class Analysis:
                 
     def person_coeff_conditionals(self, num_points: int = 32, num_samples_stat = 200):
         _,prior_samples,_ = self.sampler(num_samples=num_points, sumnet=True)
-        self.NPE.density_estimator._device = self.device
+        self.trainer.de_net._device = self.device
         with torch.no_grad():
             corrcoef = conditional_corrcoeff(
-                density=self.NPE.density_estimator,
+                density=self.trainer.de_net,
                 limits=torch.tensor([[1e-4,1-1e-4]]*6,device=self.device),
                 condition = prior_samples,resolution=num_samples_stat
                 
@@ -572,7 +570,7 @@ class Analysis:
             for i, (lab, img, rnge) in enumerate(self.valdat):
                 if sumnet:
                     with torch.no_grad():
-                        img = self.NPE.summary_net(img.to(self.device), rnge.to(self.device)).cpu()
+                        img = self.trainer.sn_net(img.to(self.device), rnge.to(self.device)).cpu()
                 if i == 0:
                     labels, images, ranges = lab, img, rnge
                 else:

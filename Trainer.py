@@ -4,190 +4,433 @@ from typing import Callable
 import matplotlib.pyplot as plt
 import numpy as np
 from alive_progress import alive_bar
+from logging import info, warning, error
 
-# DEPRICATED, WILL BE REMOVED IN THE FUTURE
-'''class DensnetHandler():
-    def __init__(self, Model: object, Training_data: object = None, Test_data: object = None, device = "cuda"):
-        self.TrainingD = Training_data
-        self.TestD = Test_data
+import os
+import tempfile
+
+from ray import train, tune
+from ray.tune.schedulers import ASHAScheduler
+
+from ray.train import Checkpoint
+
+from ray.tune.search.hyperopt import HyperOptSearch
+
+
+class Trainer:
+    def __init__(self, 
+                 NetworkHandlerDE,
+                 NetworkHandlerSN,
+                 training_data, 
+                 test_data, 
+                 device = 'cuda'):
+        self.sn_net = NetworkHandlerSN
+        self.de_net = NetworkHandlerDE
+        self.training_data = training_data
+        self.test_data = test_data
         self.device = device
-        self.xshape = Training_data.dataset[0][1].shape
-        self.yshape = Training_data.dataset[0][0].shape
-        self.in_dim = self.yshape[-1]
-        self.out_dim = self.yshape[-1]
-        self.Model = Model(in_dim = self.in_dim, n_blocks=6, n_nodes=60, cond_dims=self.in_dim).to(device)
+        self.opti_hype = False
+    
+    def train(self, config: dict,
+              epochs: int,
+              pretrain_epochs: int = 0,
+              freezed_epochs: int = 0,):
+        """_summary_
+
+        Args:
+            config (dict): Example config might look like:
+                            {
+                                "grad_clip": 1,
+                                "optimizer": torch.optim.Adam,
+                                "optimizer_kwargs": {"lr": 1e-3},
+                            }
+            epochs (int): _description_
+            pretrain_epochs (int, optional): _description_. Defaults to 0.
+            freezed_epochs (int, optional): _description_. Defaults to 0.
+
+        Returns:
+            _type_: _description_
+        """        
         
-    def train(self, epochs: int,
-                optimizer: object, lossf: Callable = nn.MSELoss(), plot: bool = True):
-        self.lossf = lossf
-        self.optimizer = optimizer
-
-        losstrain = []
-        losstest = []
-        with alive_bar(epochs, force_tty=True, refresh_secs=5) as bbar:
-            for epoch in range(epochs):
-                self.Model.train()
-                for lab, img, _ in self.TrainingD:
-
-                    img, lab = img.to(self.device), lab.to(self.device)
-
-
-                    loss = self.Model.loss(x=lab, cond=img)
-                    loss.backward()
-                    self.optimizer.step()
-                    self.optimizer.zero_grad()
-                    losstrain.append(loss.item())
-                losstest.append(self.test_self())
-                bbar()
-        if plot:
-            plt.plot(np.linspace(0, epochs, len(losstrain)), losstrain, label='Trainingsloss', alpha=0.5)
-            plt.plot(np.linspace(0, epochs, len(losstest)), losstest, label='Testloss')
-            plt.xlabel("epochs")
-            plt.ylabel("loss")
-            #plt.yscale('log')
-            #plt.xticks(np.linspace(0,epochs*lentrain,10, dtype=int), np.linspace(0,epochs,10, dtype=int))
-            plt.legend()
-            plt.savefig("./run.png", dpi=400)
-            plt.show()
-            plt.clf()
-        return {"trainloss": losstrain, 
-        "testloss": losstest}
-                
-    def sample(self, num_samples: int, c: torch.FloatTensor, z: torch.FloatTensor = None) -> torch.FloatTensor:
-        if z is None:
-            z = torch.randn(num_samples, self.out_dim).to(self.device)
-        return self.Model(z, c = [c.repeat((num_samples,1)).to(self.device)], rev=True)
-    
-    def save(self, path: str = "de_model.pt"):
-        torch.save(self.Model.state_dict(), path)
-    
-    def load(self, path: str = "de_model.pt"):
-        self.Model.load_state_dict(torch.load(path, map_location=torch.device(self.device)))
-        self.Model.eval()'''
-
-class SumnetHandler():
-    def __init__(self, Model: object, device = "cuda",
-                 model_init_kwargs: dict = {}):
-        self.Model = Model(**model_init_kwargs).to(device)
-        self.device = device
-    
-    def train(self, epochs: int,  training_data: object, test_data: object,
-              optimizer: object, optimizer_kwargs: dict = {},
-            lossf: Callable = nn.MSELoss(), plot_label: str = ""):
-        self.lossf = lossf
-        self.optimizer = optimizer
-
-        losstrain = []
-        losstest = []
-        with alive_bar(epochs, force_tty=True, refresh_secs=5) as bbar:
-            for epoch in range(epochs):
-                self.Model.train()
-                for lab, img, rnge in training_data:
-                    img, lab, rnge = img.to(self.device), lab.to(self.device), rnge.to(self.device)
-                    x = self.Model(img,rnge)
-                    loss = self.lossf(lab, x)
-                    loss.backward()
-                    self.optimizer.step()
-                    self.optimizer.zero_grad()
-                    losstrain.append(loss.item())
-
-                losstest.append(self.test_self(test_data))
-                bbar()
-        if plot_label == "":
-            plt.plot(np.linspace(0, epochs, len(losstrain)), losstrain, label='Trainingsloss', alpha=0.5)
-            plt.plot(np.linspace(0, epochs, len(losstest)), losstest, label='Testloss')
-            plt.xlabel("epochs")
-            plt.ylabel("loss")
-            #plt.yscale('log')
-            #plt.xticks(np.linspace(0,epochs*lentrain,10, dtype=int), np.linspace(0,epochs,10, dtype=int))
-            plt.legend()
-            plt.savefig(f"{plot_label}.png", dpi=400)
-            plt.show()
-            plt.clf()
-        return {"trainloss": losstrain,
-        "testloss": losstest}
-
-    def test_self(self, TestD):
-        return SumnetHandler.test(TestD, self.Model, self.lossf, plot = False, device=self.device)
-
-    @staticmethod
-    def test(Validation_data: object, Model: object, lossf: Callable, plot: bool = True, device = 'cuda',
-            denormalize: Callable = (lambda x: x)):
-        Model.eval()
-        test_loss = []
-        with torch.no_grad():
-            for lab, img, rnge  in Validation_data:
-                img, lab, rnge = img.to(device), lab.to(device), rnge.to(device)
-                pred = Model(img, rnge)
-                test_loss.append(lossf(denormalize(pred), denormalize(lab)).to('cpu').item())
-        if plot:
-            if len(test_loss) > 1:
-                plt.hist(test_loss)
-                plt.title(f'test loss: {np.mean(test_loss)}')
-                plt.xlabel("loss")
-                plt.ylabel("count")
-                plt.savefig("./eval.png", dpi=400)
-                plt.show()
-        else: 
-            return np.mean(test_loss)
+        if self.opti_hype:
+            # quck and dirty way to reinizialize the networks
+            self.sn_net.__init__(config["summary_network_kwargs"])
+            self.de_net.__init__(config["density_network_kwargs"])
         
-    
-    @staticmethod
-    def test_specific(Validation_data: object, Model: object, lossf: Callable, num_samples: int, device = 'cuda',
-                    denormalize: Callable = (lambda x: x)):
-        Model.to(device)
-        Model.eval()
-        test_idx = np.random.randint(0, len(Validation_data), num_samples)
-        test_loss = []
-        with torch.no_grad():
-            for lab, img, rnge in Validation_data:
-                if num_samples > 0:
-                    img, lab, rnge = img.to(device), lab.to('cpu'), rnge.to('cpu')
-                    pred = Model(img, rnge).to('cpu')
-                    print(f'loss: ' + str(lossf(denormalize(pred), denormalize(lab)).item()) + '\n',
-                        f'pred: ' + str(denormalize(pred.to('cpu'))) + '\n',
-                        f'truth: ' + str(denormalize(lab.to('cpu'))))
-                    num_samples -= 1
-                else:
-                    break
-
-    def fast_forward(self, data: torch.FloatTensor, data_dim: float = 5) -> torch.FloatTensor:
-        '''data: The input which should be passed to the neural network
-        data_dim: The expected dimension of the neural network (useful to unsqueeze first dimension [batch dim])'''
-        while len(data.shape) < data_dim:
-            data = data.unsqueeze(0)
-        self.Model.eval()
-        with torch.no_grad():
-            res = self.Model(data)
-        return res
-    
-    def full_inference(self, dataloader: object) -> torch.FloatTensor:
-        with alive_bar(len(dataloader), force_tty=True) as bar:
-            with torch.no_grad():
-                for i, (lab, img, _) in enumerate(dataloader):
-                    img, lab = img.to(self.device), lab.to(self.device)
-                    
-                    if not i:
-                        summary_vec = torch.empty(0,lab.shape[1])
-                        labels = torch.empty(0,lab.shape[1])
-
-                    pred = self.Model(img)
-                    summary_vec = torch.cat((summary_vec, pred), dim=0)
-                    labels = torch.cat((labels, lab), dim=0)
-                    bar()
-        return (summary_vec, labels)
+        
+        # set bool for gradient clipping
+        if config["grad_clip"] > 0:
+            grad_clipping = True
+            info("Gradient clipping activated")
+        else:
+            grad_clipping = False
+            info("No gradient clipping")
+        
+        
+        self.sn_net.to(self.device)
+        self.de_net.to(self.device)
+        
+        # pretrain summary_net
+        if pretrain_epochs > 0:
+            info("Pretraining summary net...")
+            self.sn_net.train(pretrain_epochs, 
+                              self.training_data, 
+                              self.test_data, 
+                              config["optimizer"], 
+                              config["optimizer_kwargs"])
+        
+        # begin main trainingsloop
+        info("Initialize optimizer for density estimator training with freezed summary...")
+        self.optimizer = config["optimizer"](self.de_net.parameters(),  **config["optimizer_kwargs"])
+        
+        info("Begin training...")
+        with alive_bar(epochs, force_tty=True, refresh_secs=1) as bar:
+                        
+            train_loss_de, test_loss_de = [], []
+            train_loss_sn, test_loss_sn = [], []
             
+            # training loop
+            for epoch in range(epochs):
+                
+                # initialize optimizer
+                if epoch == freezed_epochs:
+                    info("Initialize optimizer for joint training...")
+                    self.optimizer = config["optimizer"](list(self.sn_net.parameters()) + list(self.de_net.parameters()),  **config["optimizer_kwargs"])
 
-    def save(self, name: str = "model.pt"):
-        torch.save(self.Model.state_dict(), name)
+                self.de_net.train()
+                if epoch < freezed_epochs:
+                    self.sn_net.eval()
+                else:
+                    self.sn_net.train()
+                    
+                train_loss_de_tmp = 0
+                train_loss_sn_tmp = 0
+                test_loss_de_tmp = 0
+                test_loss_sn_tmp = 0
+                    
+                    
+                for lab, img, rnge in self.training_data:
+                    
+                    img, lab, rnge = img.to(self.device), lab.to(self.device), rnge.to(self.device)
 
-    def load(self, name: str = "model.pt"):
-        self.Model.load_state_dict(torch.load(name, map_location=torch.device(self.device), weights_only=True))
-        self.Model.eval()
+                    
+                    if self.sn_net.flow:
+                        img, loss_sn = self.sn_net.loss(img, lab, rnge)
+                        loss_de = self.de_net.loss(img, lab, rnge)
+                        loss = loss_de.mean() + loss_sn.mean()
+                        train_loss_sn_tmp += loss_sn.mean().item()
+                    else:
+                        img = self.sn_net(img, rnge)
+                        loss_de = self.de_net.loss(img, lab, rnge)
+                        loss = loss_de.mean()
+                        train_loss_sn_tmp += nn.MSELoss(reduction="none")(img, lab).mean(0).mean().item()
+
+                    train_loss_de_tmp += loss_de.mean().item()
+                    
+                    loss.backward()
+                    
+                    # grad clipping
+                    if grad_clipping:
+                        torch.nn.utils.clip_grad_norm_(self.de_net.parameters(), config["grad_clip"])
+                        torch.nn.utils.clip_grad_norm_(self.sn_net.parameters(), config["grad_clip"])
+                    
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                
+                info(f"Epoch {epoch} finished. Trainloss DE: {train_loss_de_tmp / len(self.training_data)}, Trainloss SN: {train_loss_sn_tmp / len(self.training_data)}")
+                
+                # testing loop
+                
+                for lab, img, rnge in self.test_data:
+                    img, lab, rnge = img.to(self.device), lab.to(self.device), rnge.to(self.device)
+                    if self.sn_net.flow:
+                        img, loss_sn = self.sn_net.loss(img, lab, rnge)
+                    else:
+                        img = self.sn_net(img, rnge)
+                        loss_sn = nn.MSELoss(reduction="none")(img, lab).mean(0)
+                        
+                    loss_de = self.de_net.loss(img, lab, rnge)
+                    test_loss_de_tmp += loss_de.mean().item()
+                    test_loss_sn_tmp += loss_sn.mean().item()
+                
+                info(f"Epoch {epoch} finished. Testloss DE: {test_loss_de_tmp}, Testloss SN: {test_loss_sn_tmp}")
+                
+                train_loss_de.append(train_loss_de_tmp / len(self.training_data))
+                test_loss_de.append(test_loss_de_tmp / len(self.test_data))
+                train_loss_sn.append(train_loss_sn_tmp / len(self.training_data))
+                test_loss_sn.append(test_loss_sn_tmp / len(self.test_data))
+                
+                if self.opti_hype:
+                    with tempfile.TemporaryDirectory() as temp_checkpoint_dir:
+                        checkpoint = None
+                        if (epoch + 1) % 5 == 0:
+                            # This saves the model to the trial directory
+                            torch.save(
+                                self.de_net.state_dict(),
+                                os.path.join(temp_checkpoint_dir, "model.pth")
+                            )
+                            checkpoint = Checkpoint.from_directory(temp_checkpoint_dir)
+
+                        # Send the current training result back to Tune
+                        train.report({"loss": test_loss_de_tmp}, checkpoint=checkpoint)
+                    
+                bar()
+                
+        self.train_loss_de = np.array(train_loss_de)
+        self.test_loss_de = np.array(test_loss_de)
+        self.train_loss_sn = np.array(train_loss_sn)
+        self.test_loss_sn = np.array(test_loss_sn)
+                
+        self.sn_net.eval()
+        self.de_net.eval()
+    
+    def opti_params(self, search_space: dict, train_kwargs: dict = {}):
+        """Perform a grid search using Baysian optimization.
+
+        Args:
+            search_space (dict): Dict containing the search space. An example might look like
+            from hyperopt import hp
+            search_space = {
+                "lr": hp.loguniform("lr", -10, -1),
+                "momentum": hp.uniform("momentum", 0.1, 0.9),
+            }
+            train_kwargs (dict, optional): Addition parameter passed to the training function. Defaults to {}.
+        """
+        
+        self.opti_hype  = True
+        hyperopt_search = HyperOptSearch(search_space, metric="loss", mode="min")
+        results = tune.run(
+            tune.with_parameters(self.train, **train_kwargs),
+            num_samples=10,
+            scheduler=ASHAScheduler(metric="loss", mode="min"),
+            search_alg=hyperopt_search,
+            resources_per_trial={"GPU": 1},
+        )
+        #results = tuner.fit()
+
+        # Obtain a trial dataframe from all run trials of this `tune.run` call.
+        dfs = {result.path: result.metrics_dataframe for result in results}
+        torch.save(dfs, "./dfs_results.pt")
+        ax = None  # This plots everything on the same plot
+        for d in dfs.values():
+            ax = d.mean_accuracy.plot(ax=ax, legend=False)
+        
+    def save_model(self, path: str = "./"):
+        self.de_net.save(path + "density_model.pt")
+        self.sn_net.save(path + "summary_model.pt")
+
+    def load_model(self, path: str = "./"):
+        self.de_net.load(path + "density_model.pt")
+        self.de_net.to(self.device)
+        self.de_net.eval()
+        self.sn_net.load(path + "summary_model.pt")
+        self.sn_net.to(self.device)
+        self.sn_net.eval()
+
+    def plot(self, filename: str):
+        plt.plot(np.arange(len(self.train_loss_de))+1, self.train_loss_de, label='Trainingsloss DE', alpha=0.5)
+        plt.plot(np.arange(len(self.test_loss_de)), self.test_loss_de, label='Testloss DE')
+        plt.plot(np.arange(len(self.train_loss_sn)), self.train_loss_sn, label='Trainingsloss SN', alpha=0.5)
+        plt.plot(np.arange(len(self.test_loss_sn)), self.test_loss_sn, label='Testloss SN')
+        plt.xlabel("epochs")
+        plt.ylabel("log loss")
+        plt.title("Log loss during training")
+        plt.legend()
+        plt.savefig(f"{filename}.png", dpi=300)
+        plt.clf()
         
         
         
-class RecNetHandler(SumnetHandler):
+
+class SNHandler:
+    def __init__(self, summary_network,
+                 summary_network_kwargs: dict = {},
+                 device = 'cuda',
+                 flow = False,
+                 no_progress_bar = False):
+        self.summary_net = summary_network(**summary_network_kwargs).to(device)
+        self.device = device
+        self.flow = flow
+        self.opti_hype = False
+        self.no_progress_bar = no_progress_bar
+        
+        info("Succesfully initialized SNHandler")
+
+    def __call__(self, img, cond=None):
+        if self.flow:
+            return self.summary_net(img, cond)[0]
+        else:
+            return self.summary_net(img, cond)
+    
+    def to(self, device):
+        self.summary_net.to(device)
+        
+        
+    def opti_params(self, search_space: dict, train_kwargs: dict = {}):
+        """Perform a grid search using Baysian optimization.
+
+        Args:
+            search_space (dict): Dict containing the search space. An example might look like
+            from hyperopt import hp
+            search_space = {
+                "lr": hp.loguniform("lr", -10, -1),
+                "momentum": hp.uniform("momentum", 0.1, 0.9),
+            }
+            train_kwargs (dict, optional): Addition parameter passed to the training function. Defaults to {}.
+        """
+        import multiprocessing as mp
+        mp.set_start_method('fork', force=True)
+
+        self.opti_hype  = True
+        hyperopt_search = HyperOptSearch(search_space, metric="loss", mode="min")
+        results = tune.run(
+            tune.with_parameters(self.training, **train_kwargs),
+            num_samples=50,
+            scheduler=ASHAScheduler(metric="loss", mode="min"),
+            search_alg=hyperopt_search,
+            resources_per_trial={"gpu": 1, "cpu": 6},
+        )
+        #results = tuner.fit()
+
+        # Obtain a trial dataframe from all run trials of this `tune.run` call.
+        dfs = {result.path: result.metrics_dataframe for result in results}
+        torch.save(dfs, "./dfs_results.pt")
+        #ax = None  # This plots everything on the same plot
+        #for d in dfs.values():
+        #    ax = d.mean_accuracy.plot(ax=ax, legend=False)
+        
+    def training(self,
+                 config: dict,
+              epochs: int,
+              training_data: object,
+              test_data: object,
+              lossf: Callable = nn.MSELoss(reduction = 'none')):
+        
+        if self.opti_hype:
+            # quick and dirty way to reinizialize the networks
+            self.summary_net.__init__(**config["summary_network_kwargs"])
+        
+        self.summary_net.to(self.device)
+
+        
+        self.optimizer = config["optimizer"](self.summary_net.parameters(), **config["optimizer_kwargs"])
+        losstrain = []
+        losstest = []
+        with alive_bar(epochs, force_tty=True, refresh_secs=1, disable=self.no_progress_bar) as bbar:
+            for epoch in range(epochs):
+                self.summary_net.train()
+                losstrain_tmp = 0
+                losstest_tmp = 0
+                for lab, img, rnge in training_data:
+                    img = img.to(self.device)
+                    lab = lab.to(self.device)
+                    rnge = rnge.to(self.device)
+                    if self.flow:
+                        x,loss_sn = self.summary_net(img, rnge)
+                        loss = lossf(x, lab).mean(0).mean() + 0.1*loss_sn.mean(0).mean()
+                    else:
+                        x = self.summary_net(img, rnge)
+                        loss = lossf(x, lab).mean(0).mean()
+                    loss.backward()
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    losstrain_tmp += loss.item()
+                losstrain.append(losstrain_tmp / len(training_data))
+                    
+                for lab, img, rnge in test_data:
+                    img = img.to(self.device)
+                    lab = lab.to(self.device)
+                    rnge = rnge.to(self.device)
+                    if self.flow:
+                        x,loss_sn = self.summary_net(img, rnge)
+                        loss = lossf(x, lab).mean(0).mean() + 0.1*loss_sn.mean(0).mean()
+                    else:
+                        x = self.summary_net(img, rnge)
+                        loss = lossf(x, lab).mean(0).mean()
+                    loss.backward()
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    losstest_tmp += loss.item()
+                losstest.append(losstest_tmp / len(test_data))
+                
+                bbar()
+                
+                if self.opti_hype:
+                    with tempfile.TemporaryDirectory() as temp_checkpoint_dir:
+                        checkpoint = None
+                        if (epoch + 1) % 20 == 0:
+                            # This saves the model to the trial directory
+                            torch.save(
+                                self.summary_net.state_dict(),
+                                os.path.join(temp_checkpoint_dir, "model.pth")
+                            )
+                            checkpoint = Checkpoint.from_directory(temp_checkpoint_dir)
+
+                        # Send the current training result back to Tune
+                        train.report({"loss": losstest[-1]}, checkpoint=checkpoint)
+                        
+                        
+        self.losstest = np.array(losstest)
+        self.losstrain = np.array(losstrain)
+        
+    def train(self):
+        self.summary_net.train()
+        
+    def eval(self):
+        self.summary_net.eval()
+        
+    def parameters(self):
+        return self.summary_net.parameters()
+        
+    def plot(self, filename: str):
+        plt.plot(np.arange(len(self.losstrain)), self.losstrain, label='Trainingsloss', alpha=0.5)
+        plt.plot(np.arange(len(self.losstest)), self.losstest, label='Testloss')
+        plt.xlabel("epochs")
+        plt.ylabel("loss")
+        plt.legend()
+        plt.savefig(f"{filename}.png", dpi=300)
+        plt.show()
+        plt.clf()
+    
+    def forward(self, img, cond=None):
+        return self.summary_net(img, cond)
+    
+    def inverse(self, lab, cond=None):
+        try:
+            result = self.summary_net.inverse(lab, cond)
+            return result
+        except Exception as e:
+            e.add_note("Inverse not implemented for this model")
+    
+    def log_prob(self, lab, cond=None):
+        return self.summary_net.log_prob(lab, cond)
+    
+    def sample(self, num_samples: int, x):
+        return self.summary_net.sample(num_samples=num_samples, x=x)
+        
+    def save(self, path: str = "./"):
+        torch.save(self.summary_net.state_dict(), path + "density_model.pt")
+        
+    def load(self, path: str = "./"):
+        self.summary_net.load_state_dict(torch.load(path + "density_model.pt"))
+        self.summary_net.to(self.device)
+        self.summary_net.eval()
+
+    def loss(self, img, lab, rnge):             
+        # computing loss
+        if self.flow:
+            x, loss = self.summary_net(img, rnge)
+            loss = loss.mean(0)
+        else:
+            x = self.summary_net(img, rnge)
+            loss = nn.MSELoss(reduction="none")(x, lab).mean(0)
+
+        return x, loss
+        
+        
+### Depricated, will removed in the future ###
+
+"""class RecNetHandler(SNHandler):
     def __init__(self, Model: object, summary_net: nn.Module = None, device = "cuda"):
         super().__init__(Model=Model, device= device)
         if summary_net is None:
@@ -321,3 +564,4 @@ class RecNetHandler(SumnetHandler):
                     num_samples -= 1
                 else:
                     break
+"""
