@@ -164,7 +164,7 @@ class Analysis:
             xx = np.linspace(0, num_samples, num_samples)
             ax[i].plot(xx, kde(xx), c='orange')
         if self.save: 
-            fig.savefig(self.path + f"{self.name}_rank.png", dpi=400)
+            fig.savefig(self.path + f"{self.filename}_rank.png", dpi=400)
         fig.show()
         fig.clf()
         torch.cuda.empty_cache()
