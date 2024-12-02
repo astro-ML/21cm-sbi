@@ -145,9 +145,11 @@ class Summary_net_lc_smol(nn.Module):
             setattr(self, f'cond_coup{j}', nn.Conv3d(out_channels, out_channels, kernel_size=1, stride=1, padding = 0))
             
             setattr(self, f"pool{j}", nn.MaxPool3d(kernel_size=(2,2,2), stride=(2,2,2)))
+            
+        self.lpool = nn.AvgPool3d(kernel_size=(2,2,2), stride=1, padding=0)
         
         self.fc_layers = nn.Sequential(
-            nn.Linear(128, 96),  # Adjusted input dimension
+            nn.Linear(init_layers["channel5"], 96),  # Adjusted input dimension
             nn.Dropout(0.1),
             nn.GELU(),
             nn.Linear(96, 64),
@@ -163,20 +165,25 @@ class Summary_net_lc_smol(nn.Module):
     def forward(self, x, cond):
         
         for j in range(1, 6):
-            print(f"Before conv{j}0, x shape: {x.shape}, cond shape: {cond.shape}")
+            #print(f"Before conv{j}0, x shape: {x.shape}, cond shape: {cond.shape}")
             x = getattr(self, f'conv{j}0')(x)
             x = getattr(self, f'bn{j}0')(x)
             x = getattr(self, f'relu{j}0')(x)
             for i in range(1, getattr(self, f"layercount{j}")):
-                print(f"Before conv{j}{i}, x shape: {x.shape}, cond shape: {cond.shape}")
+                #print(f"Before conv{j}{i}, x shape: {x.shape}, cond shape: {cond.shape}")
                 x = x * getattr(self, f'cond{j}{i}')(cond).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
                 x = getattr(self, f'conv{j}{i}')(x)
                 x = getattr(self, f'bn{j}{i}')(x)
                 x = getattr(self, f'relu{j}{i}')(x)
-                print(f"Before cond_coup{j}, x shape: {x.shape}, cond shape: {cond.shape}")
+                #print(f"Before cond_coup{j}, x shape: {x.shape}, cond shape: {cond.shape}")
             x = x * getattr(self, f'cond_coup{j}')(x)
             x = getattr(self, f'pool{j}')(x)
-            print(f"After pool{j}, x shape: {x.shape}")
+            #print(f"After pool{j}, x shape: {x.shape}")
+            
+        x = self.lpool(x)
+        
+        x = torch.flatten(x, 1, -1)
+        x = self.fc_layers(x)
 
         return x
     
