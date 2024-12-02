@@ -93,37 +93,58 @@ class Summary_net_lc_lil(nn.Module):
 
 # wants (28,28,680) input
 class Summary_net_lc_smol(nn.Module):
-    def __init__(self):
+    def __init__(self, in_channels = 1,
+                 init_layers = {
+            "layer_size1": 1,
+            "channel1": 48,
+            "kernel_size1_xy": 3,
+            "kernel_size1_z": 15,
+            "stride1": 1,
+            
+            "layer_size2": 1,
+            "channel2": 48,
+            "kernel_size2": 3,
+            
+            "layer_size3": 1,
+            "channel3": 64,
+            "kernel_size3": 3,
+            
+            "layer_size4": 1,
+            "channel4": 96,
+            "kernel_size4": 3,
+            
+            "layer_size5": 1,
+            "channel5": 128,
+            "kernel_size5": 3,   
+        }):
         super().__init__()
-        self.conv_1 = nn.Sequential(
-            nn.Conv3d(in_channels=1, out_channels=48, kernel_size=(3, 3, 15), stride=(1, 1, 15)), 
-            nn.GELU(),
-            nn.BatchNorm3d(48),)
-        self.conv_2 = nn.Sequential(
-            nn.Conv3d(in_channels=48, out_channels=48, kernel_size=(3, 3, 3)), 
-            nn.GELU(),
-            nn.BatchNorm3d(48),)
-        self.conv_3 = nn.Sequential(
-            nn.MaxPool3d(kernel_size=(2, 2, 3)),
-            nn.Conv3d(in_channels=48, out_channels=64, kernel_size=(3, 3, 3)), 
-            nn.GELU(),
-            nn.BatchNorm3d(64),)
-        self.conv_4 = nn.Sequential(
-            nn.ZeroPad3d((0, 0, 1,1,1,1)),  # Padding for width and height only, no depth padding
-            nn.Conv3d(in_channels=64, out_channels=96, kernel_size=(3, 3, 3)), 
-            nn.GELU(),
-            nn.BatchNorm3d(96),)
-        self.conv_5 = nn.Sequential(
-            nn.MaxPool3d(kernel_size=(2, 2, 2)),
-            #nn.ZeroPad3d((0, 0, 1,1,1,1)),
-            nn.Conv3d(in_channels=96, out_channels=128, kernel_size=(3, 3, 3)), 
-            nn.GELU(),
-            nn.BatchNorm3d(128),
-        )
-        self.pooling = nn.Sequential(
-            nn.MaxPool3d(kernel_size=(2,2,1), stride=(2,2,1), padding=0),
-            nn.AvgPool3d(kernel_size=(3,3,3), stride=1, padding=0)
-        )
+        
+        for j in range(1,6):
+            setattr(self, f"layercount{j}", init_layers[f"layer_size{j}"])
+            
+            out_channels = init_layers[f"channel{j}"]
+            if j == 1:
+                kernel_size = torch.tensor([init_layers[f"kernel_size{j}_xy"],init_layers[f"kernel_size{j}_xy"],init_layers[f"kernel_size{j}_z"]])
+                stride = torch.tensor([init_layers[f"stride{j}"],init_layers[f"stride{j}"],init_layers[f"kernel_size{j}_z"]])
+            else:
+                kernel_size = torch.tensor([init_layers[f"kernel_size{j}"],init_layers[f"kernel_size{j}"],init_layers[f"kernel_size{j}"]])
+                stride = torch.tensor([int(init_layers[f"kernel_size{j}"]/2),int(init_layers[f"kernel_size{j}"]/2), 1])
+                in_channels = init_layers[f"channel{j-1}"]
+            setattr(self, f'conv{j}0', nn.Conv3d(in_channels, out_channels, kernel_size, stride=stride, padding = kernel_size-stride))
+            setattr(self, f'bn{j}0', nn.BatchNorm3d(out_channels))
+            setattr(self, f'relu{j}0', nn.GELU())
+            setattr(self, f'cond{j}0', nn.Sequential(nn.Linear(2, out_channels), nn.Tanh()))
+            in_channels = out_channels
+            
+            for i in range(1,getattr(self, f"layercount{j}")):
+                setattr(self, f'cond{j}{i}', nn.Sequential(nn.Linear(2, in_channels), nn.Tanh()))
+                setattr(self, f'conv{j}{i}', nn.Conv3d(in_channels, out_channels, kernel_size=(3,3,3), stride = (1,1,1), padding = (1,1,1)))
+                setattr(self, f'bn{j}{i}', nn.BatchNorm3d(out_channels))
+                setattr(self, f'relu{j}{i}', nn.GELU())
+            
+            setattr(self, f'cond_coup{j}', nn.Conv3d(out_channels, out_channels, kernel_size=1, stride=1, padding = 0))
+            
+            setattr(self, f"pool{j}", nn.MaxPool3d(kernel_size=(2,2,2), stride=(2,2,2)))
         
         self.fc_layers = nn.Sequential(
             nn.Linear(128, 96),  # Adjusted input dimension
@@ -139,21 +160,24 @@ class Summary_net_lc_smol(nn.Module):
             nn.Sigmoid()
         )
     
-    def forward(self, x):
-        #print(x.shape)
-        x = self.conv_1(x)
-        #print(x.shape)
-        x = self.conv_2(x)
-        #print(x.shape)
-        x = self.conv_3(x)
-        #print(x.shape)
-        x = self.conv_4(x)
-        #print(x.shape)
-        x = self.conv_5(x)
-        #print(x.shape)
-        x = self.pooling(x)
-        x = torch.flatten(x, 1, -1)
-        x = self.fc_layers(x)
+    def forward(self, x, cond):
+        
+        for j in range(1, 6):
+            print(f"Before conv{j}0, x shape: {x.shape}, cond shape: {cond.shape}")
+            x = getattr(self, f'conv{j}0')(x)
+            x = getattr(self, f'bn{j}0')(x)
+            x = getattr(self, f'relu{j}0')(x)
+            for i in range(1, getattr(self, f"layercount{j}")):
+                print(f"Before conv{j}{i}, x shape: {x.shape}, cond shape: {cond.shape}")
+                x = x * getattr(self, f'cond{j}{i}')(cond).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+                x = getattr(self, f'conv{j}{i}')(x)
+                x = getattr(self, f'bn{j}{i}')(x)
+                x = getattr(self, f'relu{j}{i}')(x)
+                print(f"Before cond_coup{j}, x shape: {x.shape}, cond shape: {cond.shape}")
+            x = x * getattr(self, f'cond_coup{j}')(x)
+            x = getattr(self, f'pool{j}')(x)
+            print(f"After pool{j}, x shape: {x.shape}")
+
         return x
     
 # wants (28,28,470) input
@@ -199,7 +223,7 @@ class Summary_net_lc_super_smol(nn.Module):
             nn.Sigmoid()
         )
     
-    def forward(self, x):
+    def forward(self, x,c):
         x = self.conv_layers(x)
         x = self.pooling(x)
         x = torch.flatten(x, 1, -1)
@@ -246,7 +270,7 @@ class global_temp_smol_inv_super_smol(nn.Module):
             nn.Conv1d(in_channels=1, out_channels=1, kernel_size=1, stride =1, padding=0),
         )
 
-    def forward(self, x):
+    def forward(self, x,c):
         x = self.fc_layers(x)
         x = x.unsqueeze(-2)
         x = self.unpooling(x)
@@ -291,7 +315,7 @@ class Summary_net_lc_super_smol_inv(nn.Module):
             nn.GELU()
         )
 
-    def forward(self, x):
+    def forward(self, x,c):
         x = self.fc_layers(x)
         x = x.view(x.size(0), -1, 1, 1, 1)
         x = self.unpooling(x)

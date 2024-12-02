@@ -28,6 +28,7 @@ class Analysis:
                 epsilon: float = 1e-4,
                 labels: list = [r"$M_{WDM}$", r"$\Omega_m$", r"$L_X$", r"$E_0$", r"$T_{vir, ion}$", r"$\zeta$"],
                 transform: bool = False,
+                save: bool = False,
                 posterior_kwargs: dict = {}):
         """Class to analyse a neural posterior (NPE) estimator on several metrics.
 
@@ -48,12 +49,9 @@ class Analysis:
         self.trainer.de_net.density_estimator.zero_grad(set_to_none=True)
         self.trainer.sn_net.summary_net.zero_grad(set_to_none=True)
         self.features = len(labels)
-        if path == "":
-            self.save = False
-        else:
-            self.save = True
-            self.filename = filename
-            self.path = path if path[-1] == "/" else path + "/"
+        self.save = save
+        self.filename = filename
+        self.path = path if path[-1] == "/" else path + "/"
         if prior is None:
             self.prior = BoxUniform(torch.zeros(self.features) + epsilon, torch.ones(self.features) - epsilon, device=self.device)
         else: self.prior = prior
