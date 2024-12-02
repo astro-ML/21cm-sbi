@@ -28,7 +28,6 @@ class Analysis:
                 epsilon: float = 1e-4,
                 labels: list = [r"$M_{WDM}$", r"$\Omega_m$", r"$L_X$", r"$E_0$", r"$T_{vir, ion}$", r"$\zeta$"],
                 transform: bool = False,
-                save: bool = False,
                 posterior_kwargs: dict = {}):
         """Class to analyse a neural posterior (NPE) estimator on several metrics.
 
@@ -49,9 +48,12 @@ class Analysis:
         self.trainer.de_net.density_estimator.zero_grad(set_to_none=True)
         self.trainer.sn_net.summary_net.zero_grad(set_to_none=True)
         self.features = len(labels)
-        self.save = save
-        self.filename = filename
-        self.path = path if path[-1] == "/" else path + "/"
+        if path == "":
+            self.save = False
+        else:
+            self.save = True
+            self.filename = filename
+            self.path = path if path[-1] == "/" else path + "/"
         if prior is None:
             self.prior = BoxUniform(torch.zeros(self.features) + epsilon, torch.ones(self.features) - epsilon, device=self.device)
         else: self.prior = prior
@@ -59,8 +61,7 @@ class Analysis:
         #                prior = self.prior, enable_transform=transform,x_o = None)
         #self.transform = transform
         if self.save:
-            with open(path + filename + "_results.json", 'w') as f:
-                json.dump({}, f, indent=4)
+            np.save(path + filename + "_results.npy", {})
         self.labels = labels
         self.posterior_kwargs = posterior_kwargs
         
@@ -551,11 +552,9 @@ class Analysis:
             in_dict (dict): Dictionary which is saved on disk.
         """
         if self.save:
-            with open(self.path + self.filename + "_results.json", 'r') as f:
-                data = json.load(f)
+            data = np.load(self.path + self.filename + "_results.npy", allow_pickle=True).item()
             data.update(in_dict)
-            with open(self.path + self.filename + "_results.json", 'w') as f:
-                json.dump(data, f, intend=4)
+            np.save(self.path + self.filename + "_results.npy", data)
         else:
             print(in_dict)
             
