@@ -145,8 +145,7 @@ class Summary_net_lc_smol(nn.Module):
             setattr(self, f'cond_coup{j}', nn.Conv3d(out_channels, out_channels, kernel_size=1, stride=1, padding = 0))
             
             setattr(self, f"pool{j}", nn.MaxPool3d(kernel_size=(2,2,2), stride=(2,2,2)))
-            
-        self.lpool = nn.AvgPool3d(kernel_size=(2,2,2), stride=1, padding=0)
+
         
         self.fc_layers = nn.Sequential(
             nn.Linear(init_layers["channel5"], 96),  # Adjusted input dimension
@@ -180,7 +179,7 @@ class Summary_net_lc_smol(nn.Module):
             x = getattr(self, f'pool{j}')(x)
             #print(f"After pool{j}, x shape: {x.shape}")
             
-        x = self.lpool(x)
+        x = torch.mean(x, dim=(2,3,4))
         
         x = torch.flatten(x, 1, -1)
         x = self.fc_layers(x)

@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import py21cmfast as p21c 
 from torchrl.modules import TruncatedNormal   
+import sys, glob, logging
 
 
 class DataHandler():
@@ -70,7 +71,8 @@ class DataHandler():
         # keep in mind the order! Here, noise will also be augmented
         # Changed ordering from range_calc -> noise -> norm -> augment
         # to: noise -> augment -> range_calc -> norm
-        if self.noise: images = self.noise_model(images)
+        if self.noise: images = self.noise_model(images, labels)
+        images = torch.tensor(images)
         if self.augment_data: images = self.transforms(images) if not self.psvar else self.transforms(images, data['std'])
         ranges = torch.stack((torch.amax(images),
         torch.amin(images)), dim=-1)
@@ -106,25 +108,60 @@ class DataHandler():
         return labels
 
 class mock_noise:
-    def __init__(self, path: str = "./"):
-        print()
-
-    def noise_mock(self, brightness_temp: np.ndarray, parameters: np.array) -> np.ndarray:
-        with open("21cm_pie/generate_data/redshifts5.npy", "rb") as data:
+    def __init__(self, path: str, noise_level: str = "opt", z_cut: int = 470):
+        self.path = path
+        self.noise_level = noise_level
+        from astropy.cosmology import Planck18
+        
+    def read_noise_files(self) -> list:
+        """
+        Read noise files based on the noise level specified in the parameters.
+        
+        Returns:
+            list: List of filenames for the noise data.
+        """
+        if self.noise_level == "opt":
+            files = glob.glob(f"{self.path}/twentyone_cm_pie/generate_data/calcfiles/opt_mocks/SKA1_Lowtrack_6.0hr_opt_0.*_LargeHII_Pk_Ts1_Tb9_nf0.52_v2.npz")
+        elif self.noise_level == "mod":
+            files = glob.glob(f"{self.path}/twentyone_cm_pie/generate_data/calcfiles/mod_mocks/SKA1_Lowtrack_6.0hr_mod_0.*_LargeHII_Pk_Ts1_Tb9_nf0.52_v2.npz")
+        else:
+            logging.info("Please choose a valid foreground model")
+            sys.exit()
+        files.sort(reverse=True)
+        return files
+            
+    def __call__(self, brightness_temp, labels) -> np.ndarray:
+        """
+        Add noise to the simulation.
+        
+        Args:
+            brightness_temp (np.ndarray): The brightness temperature data.
+            parameters (np.array): The simulation parameters.
+        
+        Returns:
+            np.ndarray: The brightness temperature data with added noise.
+        """
+        if self.path[-1] == "/":
+            self.path = self.path[:-1]
+            
+        
+        logging.info('Create mock')
+        with open(f"{self.path}/twentyone_cm_pie/generate_data/redshifts5.npy", "rb") as data:
             box_redshifts = list(np.load(data, allow_pickle=True))
             box_redshifts.sort()
-        cosmo_params = p21c.CosmoParams(OMm=parameters[1])
-        astro_params = p21c.AstroParams(INHOMO_RECO=True)
-        user_params = p21c.UserParams(HII_DIM=140, BOX_LEN=200)
-        flag_options = p21c.FlagOptions()
-        sim_lightcone = p21c.LightCone(5., user_params, cosmo_params, astro_params, flag_options, 0,
-                                       {"brightness_temp": brightness_temp}, 35.05)
-        redshifts = sim_lightcone.lightcone_redshifts
+        from astropy.cosmology import Planck18
+        user_params = p21c.UserParams(BOX_LEN=200, HII_DIM=28)
+        with p21c.global_params.use(**{"M_WDM": labels[0]}):
+            Planck18 = Planck18.clone(Om0=labels[1])
+            lightcone = p21c.RectilinearLightconer.with_equal_cdist_slices(min_redshift=5, max_redshift=35,
+                    resolution=user_params.cell_size, cosmo=Planck18)
+        
+            redshifts = lightcone.lc_redshifts[:470]
         box_len = np.array([])
         y = 0
         z = 0
         for x in range(len(brightness_temp[0][0])):
-            if redshifts[x] > (box_redshifts[y + 1] + box_redshifts[y]) / 2:
+            if (redshifts[x] > (box_redshifts[y + 1] + box_redshifts[y]) / 2) and x - z > 0:
                 box_len = np.append(box_len, x - z)
                 y += 1
                 z = x
@@ -134,11 +171,10 @@ class mock_noise:
         for x in box_len:
             delta_T_split.append(brightness_temp[:,:,int(y):int(x+y)])
             y+=x
-            
         mock_lc = np.zeros(brightness_temp.shape)
-        cell_size = 200 / 140
-        hii_dim = 140
-        k140 = np.fft.fftfreq( 140, d=cell_size / 2. / np.pi)
+        cell_size = user_params.cell_size.value
+        hii_dim = user_params.HII_DIM
+        k140 = np.fft.fftfreq(hii_dim, d=cell_size / 2. / np.pi)
         index1 = 0
         index2 = 0
         files = self.read_noise_files()
@@ -169,15 +205,14 @@ class mock_noise:
                             deldel_T_mock[n_x, n_y, n_z] = 0
                         else:
                             deldel_T_mock[n_x, n_y, n_z] = deldel_T[n_x, n_y, n_z] + deldel_T_noise[n_x, n_y, n_z] / cell_size ** 3
-            
             delta_T_mock = np.fft.irfftn(deldel_T_mock, s=(hii_dim, hii_dim, box_len[x]))
             index1 = index2
             index2 += delta_T_mock.shape[2]
             mock_lc[:, :, index1:index2] = delta_T_mock
             if x % 5 == 0:
-                self.debug(f'mock created to {int(100 * index2 / 2350)}%')
-        return mock_lc
-    
+                logging.info(f'mock created to {int(100 * index2 / 2350)}%')
+        print("done")
+        return mock_lc.astype(np.float32)
 
 
 class gaussian_noise:
