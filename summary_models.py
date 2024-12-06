@@ -112,25 +112,23 @@ class Summary_net_lc_smol(nn.Module):
             "layer_size4": 1,
             "channel4": 96,
             "kernel_size4": 3,
-            
-            "layer_size5": 1,
-            "channel5": 128,
-            "kernel_size5": 3,   
         }):
         super().__init__()
         
-        for j in range(1,6):
+        for j in range(1,5):
             setattr(self, f"layercount{j}", init_layers[f"layer_size{j}"])
             
             out_channels = init_layers[f"channel{j}"]
             if j == 1:
                 kernel_size = torch.tensor([init_layers[f"kernel_size{j}_xy"],init_layers[f"kernel_size{j}_xy"],init_layers[f"kernel_size{j}_z"]])
                 stride = torch.tensor([init_layers[f"stride{j}"],init_layers[f"stride{j}"],init_layers[f"kernel_size{j}_z"]])
+                padding = (kernel_size/2).astype('int')
             else:
                 kernel_size = torch.tensor([init_layers[f"kernel_size{j}"],init_layers[f"kernel_size{j}"],init_layers[f"kernel_size{j}"]])
-                stride = torch.tensor([int(init_layers[f"kernel_size{j}"]/2),int(init_layers[f"kernel_size{j}"]/2), 1])
+                padding = (kernel_size/2).astype('int')
+                stride = 1
                 in_channels = init_layers[f"channel{j-1}"]
-            setattr(self, f'conv{j}0', nn.Conv3d(in_channels, out_channels, kernel_size, stride=stride, padding = kernel_size-stride))
+            setattr(self, f'conv{j}0', nn.Conv3d(in_channels, out_channels, kernel_size, stride=stride, padding = padding))
             setattr(self, f'bn{j}0', nn.BatchNorm3d(out_channels))
             setattr(self, f'relu{j}0', nn.GELU())
             setattr(self, f'cond{j}0', nn.Sequential(nn.Linear(2, out_channels), nn.Tanh()))
@@ -138,7 +136,7 @@ class Summary_net_lc_smol(nn.Module):
             
             for i in range(1,getattr(self, f"layercount{j}")):
                 setattr(self, f'cond{j}{i}', nn.Sequential(nn.Linear(2, in_channels), nn.Tanh()))
-                setattr(self, f'conv{j}{i}', nn.Conv3d(in_channels, out_channels, kernel_size=(3,3,3), stride = (1,1,1), padding = (1,1,1)))
+                setattr(self, f'conv{j}{i}', nn.Conv3d(in_channels, out_channels, kernel_size=(3,3,3), stride = (1,1,1), padding = 1))
                 setattr(self, f'bn{j}{i}', nn.BatchNorm3d(out_channels))
                 setattr(self, f'relu{j}{i}', nn.GELU())
             
@@ -148,7 +146,7 @@ class Summary_net_lc_smol(nn.Module):
 
         
         self.fc_layers = nn.Sequential(
-            nn.Linear(init_layers["channel5"], 96),  # Adjusted input dimension
+            nn.Linear(init_layers["channel4"], 96),  # Adjusted input dimension
             nn.Dropout(0.1),
             nn.GELU(),
             nn.Linear(96, 64),
@@ -163,7 +161,7 @@ class Summary_net_lc_smol(nn.Module):
     
     def forward(self, x, cond):
         
-        for j in range(1, 6):
+        for j in range(1, 5):
             #print(f"Before conv{j}0, x shape: {x.shape}, cond shape: {cond.shape}")
             x = getattr(self, f'conv{j}0')(x)
             x = getattr(self, f'bn{j}0')(x)
