@@ -333,7 +333,7 @@ def convert_pt_to_2dps(path: str, prefix: str = "", debug: bool = False,
 
                 res = calculate_ps(lc=img, lc_redshifts=lc.lightcone_redshifts[:img.shape[-1]], 
                     box_length=summary_statistics_parameters['BOX_LEN'], box_side_shape=summary_statistics_parameters["HII_DIM"],
-                    log_bins=False, zs=summary_statistics_parameters["z-eval"], calc_1d=False, calc_2d=True, 
+                    log_bins=False, zs=summary_statistics_parameters["z-eval"], calc_1d=False, calc_2d=True,
                     kpar_bins=summary_statistics_parameters["bins"], nbins=summary_statistics_parameters["bins"], bin_ave=True, 
                     k_weights=ignore_zero_absk, postprocess=True, get_variance=True)
 

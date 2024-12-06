@@ -8,7 +8,7 @@ class NPEHandler:
     def __init__(self, density_estimator,
                  density_estimator_kwargs: dict = {},
                  device = 'cuda'):
-        self.density_estimator = density_estimator(**density_estimator_kwargs)
+        self.density_estimator = density_estimator(**density_estimator_kwargs, device=device)
         self.device = device
         
         info("Succesfully initialized NPEHandler")
