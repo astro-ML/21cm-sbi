@@ -209,11 +209,8 @@ class Trainer:
         #results = tuner.fit()
 
         # Obtain a trial dataframe from all run trials of this `tune.run` call.
-        dfs = {result.path: result.metrics_dataframe for result in results}
-        torch.save(dfs, "./dfs_results.pt")
-        ax = None  # This plots everything on the same plot
-        for d in dfs.values():
-            ax = d.mean_accuracy.plot(ax=ax, legend=False)
+        torch.save(results.get_all_configs, "./opt_configs.pt")
+        torch.save(results.results, "./opt_results.pt")
         
     def save_model(self, path: str = "./"):
         self.de_net.save(path + "density_model.pt")
@@ -292,9 +289,9 @@ class SNHandler:
         )
         #results = tuner.fit()
 
-        # Obtain a trial dataframe from all run trials of this `tune.run` call.
-        dfs = {result.path: result.metrics_dataframe for result in results}
-        torch.save(dfs, "./dfs_results.pt")
+
+        torch.save(results.get_all_configs, "./opt_configs.pt")
+        torch.save(results.results, "./opt_results.pt")
         #ax = None  # This plots everything on the same plot
         #for d in dfs.values():
         #    ax = d.mean_accuracy.plot(ax=ax, legend=False)
