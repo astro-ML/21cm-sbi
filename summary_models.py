@@ -99,7 +99,6 @@ class Summary_net_lc_smol(nn.Module):
             "channel1": 48,
             "kernel_size1_xy": 3,
             "kernel_size1_z": 15,
-            "stride1": 1,
             
             "layer_size2": 1,
             "channel2": 48,
@@ -121,11 +120,11 @@ class Summary_net_lc_smol(nn.Module):
             out_channels = init_layers[f"channel{j}"]
             if j == 1:
                 kernel_size = torch.tensor([init_layers[f"kernel_size{j}_xy"],init_layers[f"kernel_size{j}_xy"],init_layers[f"kernel_size{j}_z"]])
-                stride = torch.tensor([init_layers[f"stride{j}"],init_layers[f"stride{j}"],init_layers[f"kernel_size{j}_z"]])
-                padding = (kernel_size/2).astype('int')
+                stride = 1
+                padding = torch.tensor([init_layers[f"kernel_size{j}_xy"],init_layers[f"kernel_size{j}_xy"],init_layers[f"kernel_size{j}_z"]])
             else:
                 kernel_size = torch.tensor([init_layers[f"kernel_size{j}"],init_layers[f"kernel_size{j}"],init_layers[f"kernel_size{j}"]])
-                padding = (kernel_size/2).astype('int')
+                padding = (kernel_size/2).to(torch.int32)
                 stride = 1
                 in_channels = init_layers[f"channel{j-1}"]
             setattr(self, f'conv{j}0', nn.Conv3d(in_channels, out_channels, kernel_size, stride=stride, padding = padding))
