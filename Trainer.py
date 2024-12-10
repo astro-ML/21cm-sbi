@@ -58,8 +58,8 @@ class Trainer:
         # 
         if self.opti_hype:
             # quck and dirty way to reinizialize the networks
-            self.sn_net.__init__(config["summary_network_kwargs"])
-            self.de_net.__init__(config["density_network_kwargs"])
+            self.sn_net.__init__(**config["summary_network_kwargs"])
+            self.de_net.__init__(**config["density_network_kwargs"])
         
         
         # set bool for gradient clipping

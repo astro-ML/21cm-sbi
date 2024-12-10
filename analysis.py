@@ -46,7 +46,7 @@ class Analysis:
         self.device = Trainer.device
         # workaround for now
         self.trainer.de_net.density_estimator.zero_grad(set_to_none=True)
-        self.trainer.sn_net.summary_net.zero_grad(set_to_none=True)
+        self.trainer.sn_net.encoder.zero_grad(set_to_none=True)
         self.features = len(labels)
         if path == "":
             self.save = False
