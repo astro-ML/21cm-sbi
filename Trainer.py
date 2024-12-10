@@ -438,7 +438,7 @@ class SNHandler:
         else:
             z = self.encoder(img)
             loss = nn.MSELoss(reduction='none')(z, lab).mean(0)
-        return 1, loss
+        return z, loss
         
         
 ### Depricated, will removed in the future ###
