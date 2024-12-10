@@ -16,6 +16,8 @@ from ray.train import Checkpoint
 
 from ray.tune.search.hyperopt import HyperOptSearch
 
+import fff.loss as fffloss
+
 
 class Trainer:
     def __init__(self, 
@@ -30,6 +32,7 @@ class Trainer:
         self.test_data = test_data
         self.device = device
         self.opti_hype = False
+        self.use_dec = self.sn_net.use_dec
     
     def train(self, config: dict,
               epochs: int,
@@ -52,6 +55,7 @@ class Trainer:
             _type_: _description_
         """        
         
+        # 
         if self.opti_hype:
             # quck and dirty way to reinizialize the networks
             self.sn_net.__init__(config["summary_network_kwargs"])
@@ -82,6 +86,7 @@ class Trainer:
         # begin main trainingsloop
         info("Initialize optimizer for density estimator training with freezed summary...")
         self.optimizer = config["optimizer"](self.de_net.parameters(),  **config["optimizer_kwargs"])
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=epochs)
         
         info("Begin training...")
         with alive_bar(epochs, force_tty=True, refresh_secs=1) as bar:
@@ -96,6 +101,7 @@ class Trainer:
                 if epoch == freezed_epochs:
                     info("Initialize optimizer for joint training...")
                     self.optimizer = config["optimizer"](list(self.sn_net.parameters()) + list(self.de_net.parameters()),  **config["optimizer_kwargs"])
+                    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=epochs)
 
                 self.de_net.train()
                 if epoch < freezed_epochs:
@@ -114,16 +120,13 @@ class Trainer:
                     img, lab, rnge = img.to(self.device), lab.to(self.device), rnge.to(self.device)
 
                     
-                    if self.sn_net.flow:
-                        img, loss_sn = self.sn_net.loss(img, lab, rnge)
-                        loss_de = self.de_net.loss(img, lab, rnge)
-                        loss = loss_de.mean() + loss_sn.mean()
-                        train_loss_sn_tmp += loss_sn.mean().item()
+                    img, losssn = self.sn_net.loss(img, lab, rnge)
+                    loss_de = self.de_net.loss(img, lab, rnge)
+                    if self.use_dec:
+                        loss = loss_de.mean() + losssn.mean()
                     else:
-                        img = self.sn_net(img, rnge)
-                        loss_de = self.de_net.loss(img, lab, rnge)
                         loss = loss_de.mean()
-                        train_loss_sn_tmp += nn.MSELoss(reduction="none")(img, lab).mean(0).mean().item()
+                    train_loss_sn_tmp += losssn.mean().item()
 
                     train_loss_de_tmp += loss_de.mean().item()
                     
@@ -138,16 +141,13 @@ class Trainer:
                     self.optimizer.zero_grad()
                 
                 info(f"Epoch {epoch} finished. Trainloss DE: {train_loss_de_tmp / len(self.training_data)}, Trainloss SN: {train_loss_sn_tmp / len(self.training_data)}")
-                
+                lr_scheduler.step()
                 # testing loop
                 
                 for lab, img, rnge in self.test_data:
                     img, lab, rnge = img.to(self.device), lab.to(self.device), rnge.to(self.device)
-                    if self.sn_net.flow:
-                        img, loss_sn = self.sn_net.loss(img, lab, rnge)
-                    else:
-                        img = self.sn_net(img, rnge)
-                        loss_sn = nn.MSELoss(reduction="none")(img, lab).mean(0)
+                    
+                    img, loss_sn = self.sn_net.loss(img, lab, rnge)
                         
                     loss_de = self.de_net.loss(img, lab, rnge)
                     test_loss_de_tmp += loss_de.mean().item()
@@ -240,27 +240,32 @@ class Trainer:
         
 
 class SNHandler:
-    def __init__(self, summary_network,
-                 summary_network_kwargs: dict = {},
+    def __init__(self, encoder,
+                 encoder_kwargs: dict = {},
+                 decoder = None,
+                 decoder_kwargs: dict = {},
                  device = 'cuda',
-                 flow = False,
-                 no_progress_bar = False):
-        self.summary_net = summary_network(**summary_network_kwargs).to(device)
+                 no_progress_bar = False,
+                 beta: float = 1.0):
+        self.encoder = encoder(**encoder_kwargs).to(device)
+        if decoder is not None:
+            self.decoder = decoder(**decoder_kwargs).to(device)
+        self.use_dec = True if decoder is not None else False
         self.device = device
-        self.flow = flow
         self.opti_hype = False
         self.no_progress_bar = no_progress_bar
+        self.beta = beta
+        self.latent_dist = torch.distributions.Normal(0,1)
         
         info("Succesfully initialized SNHandler")
 
     def __call__(self, img, cond=None):
-        if self.flow:
-            return self.summary_net(img, cond)[0]
-        else:
-            return self.summary_net(img, cond)
+        return self.encoder(img, cond)
     
     def to(self, device):
-        self.summary_net.to(device)
+        self.encoder.to(device)
+        if self.use_dec:
+            self.decoder.to(device)
         
         
     def opti_params(self, search_space: dict, train_kwargs: dict = {}):
@@ -305,49 +310,50 @@ class SNHandler:
         
         if self.opti_hype:
             # quick and dirty way to reinizialize the networks
-            self.summary_net.__init__(**config["summary_network_kwargs"])
+            self.encoder.__init__(**config["summary_network_kwargs"])
+            if self.use_dec:
+                self.decoder.__init__(**config["decoder_kwargs"])
         
-        self.summary_net.to(self.device)
+        self.encoder.to(self.device)
+        if self.use_dec:
+            self.decoder.to(self.device)
 
-        
-        self.optimizer = config["optimizer"](self.summary_net.parameters(), **config["optimizer_kwargs"])
+        if self.use_dec:
+            self.optimizer = config["optimizer"](list(self.encoder.parameters()) + list(self.decoder.parameters()), **config["optimizer_kwargs"])
+        else:
+            self.optimizer = config["optimizer"](self.encoder.parameters(), **config["optimizer_kwargs"])
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=epochs)
         losstrain = []
         losstest = []
         with alive_bar(epochs, force_tty=True, refresh_secs=1, disable=self.no_progress_bar) as bbar:
             for epoch in range(epochs):
-                self.summary_net.train()
+                self.encoder.train()
                 losstrain_tmp = 0
                 losstest_tmp = 0
+                self.train()
                 for lab, img, rnge in training_data:
                     img = img.to(self.device)
                     lab = lab.to(self.device)
                     rnge = rnge.to(self.device)
-                    if self.flow:
-                        x,loss_sn = self.summary_net(img, rnge)
-                        loss = lossf(x, lab).mean(0).mean() + 0.1*loss_sn.mean(0).mean()
-                    else:
-                        x = self.summary_net(img, rnge)
-                        loss = lossf(x, lab).mean(0).mean()
-                    loss.backward()
+                    x, loss_sn = self.loss(img, lab, rnge)
+                    loss_sn = loss_sn.mean()
+                    loss_sn.backward()
                     self.optimizer.step()
                     self.optimizer.zero_grad()
-                    losstrain_tmp += loss.item()
+                    losstrain_tmp += loss_sn.item()
                 losstrain.append(losstrain_tmp / len(training_data))
-                    
+                
+                lr_scheduler.step()
+                
+                self.eval()
                 for lab, img, rnge in test_data:
+                    
                     img = img.to(self.device)
                     lab = lab.to(self.device)
                     rnge = rnge.to(self.device)
-                    if self.flow:
-                        x,loss_sn = self.summary_net(img, rnge)
-                        loss = lossf(x, lab).mean(0).mean() + 0.1*loss_sn.mean(0).mean()
-                    else:
-                        x = self.summary_net(img, rnge)
-                        loss = lossf(x, lab).mean(0).mean()
-                    loss.backward()
-                    self.optimizer.step()
-                    self.optimizer.zero_grad()
-                    losstest_tmp += loss.item()
+                    x,loss_sn = self.loss(img,lab, rnge)
+                    loss_sn = loss_sn.mean()
+                    losstest_tmp += loss_sn.item()
                 losstest.append(losstest_tmp / len(test_data))
                 
                 bbar()
@@ -358,7 +364,7 @@ class SNHandler:
                         if (epoch + 1) % 20 == 0:
                             # This saves the model to the trial directory
                             torch.save(
-                                self.summary_net.state_dict(),
+                                self.encoder.state_dict(),
                                 os.path.join(temp_checkpoint_dir, "model.pth")
                             )
                             checkpoint = Checkpoint.from_directory(temp_checkpoint_dir)
@@ -371,13 +377,20 @@ class SNHandler:
         self.losstrain = np.array(losstrain)
         
     def train(self):
-        self.summary_net.train()
+        self.encoder.train()
+        if self.use_dec:
+            self.decoder.train()
         
     def eval(self):
-        self.summary_net.eval()
+        self.encoder.eval()
+        if self.use_dec:
+            self.decoder.eval()
         
     def parameters(self):
-        return self.summary_net.parameters()
+        if self.use_dec:
+            return list(self.encoder.parameters()) + list(self.decoder.parameters())
+        else:
+            return self.encoder.parameters()
         
     def plot(self, filename: str):
         plt.plot(np.arange(len(self.losstrain)), self.losstrain, label='Trainingsloss', alpha=0.5)
@@ -390,39 +403,42 @@ class SNHandler:
         plt.clf()
     
     def forward(self, img, cond=None):
-        return self.summary_net(img, cond)
+        if self.use_dec:
+            z = self.encoder(img, cond)
+            x = self.decoder(z, cond)
+            return z,x
+        else:
+            return self.encoder(img, cond)
     
     def inverse(self, lab, cond=None):
         try:
-            result = self.summary_net.inverse(lab, cond)
+            result = self.encoder.inverse(lab, cond)
             return result
         except Exception as e:
             e.add_note("Inverse not implemented for this model")
-    
-    def log_prob(self, lab, cond=None):
-        return self.summary_net.log_prob(lab, cond)
-    
-    def sample(self, num_samples: int, x):
-        return self.summary_net.sample(num_samples=num_samples, x=x)
         
     def save(self, path: str = "./"):
-        torch.save(self.summary_net.state_dict(), path + "density_model.pt")
+        torch.save(self.encoder.state_dict(), path + "encoder.pt")
+        if self.use_dec:
+            torch.save(self.decoder.state_dict(), path + "decoder.pt")
         
     def load(self, path: str = "./"):
-        self.summary_net.load_state_dict(torch.load(path + "density_model.pt"))
-        self.summary_net.to(self.device)
-        self.summary_net.eval()
+        self.encoder.load_state_dict(torch.load(path + "density_model.pt"))
+        self.encoder.to(self.device)
+        self.encoder.eval()
+        if self.use_dec:
+            self.decoder.load_state_dict(torch.load(path + "decoder.pt"))
+            self.decoder.to(self.device)
+            self.decoder.eval()
 
-    def loss(self, img, lab, rnge):             
-        # computing loss
-        if self.flow:
-            x, loss = self.summary_net(img, rnge)
-            loss = loss.mean(0)
+    def loss(self, img, lab, rnge):
+        if self.use_dec:
+            loss = fffloss.fff_loss(img, self.encoder, self.decoder, self.latent_dist, self.beta)
+            #z = self.encoder(img)
         else:
-            x = self.summary_net(img, rnge)
-            loss = nn.MSELoss(reduction="none")(x, lab).mean(0)
-
-        return x, loss
+            z = self.encoder(img)
+            loss = nn.MSELoss(reduction='none')(z, lab).mean(0)
+        return 1, loss
         
         
 ### Depricated, will removed in the future ###

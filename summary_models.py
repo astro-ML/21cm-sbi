@@ -226,12 +226,53 @@ class Summary_net_lc_super_smol(nn.Module):
             nn.Sigmoid()
         )
     
-    def forward(self, x,c):
+    def forward(self, x):
         x = self.conv_layers(x)
         x = self.pooling(x)
         x = torch.flatten(x, 1, -1)
         x = self.fc_layers(x)
         return x
+    
+class Inverted_Summary_net_lc_super_smol(nn.Module):
+    def __init__(self):
+        super().__init__()
+        
+        self.fc_layers = nn.Sequential(
+            nn.Linear(6, 32),
+            nn.Dropout(0.1),
+            nn.GELU(),
+            nn.Linear(32, 64),
+            nn.Dropout(0.1),
+            nn.GELU(),
+            nn.Linear(64, 96),
+            nn.Dropout(0.1),
+            nn.GELU()
+        )
+        
+        self.upconv_layers = nn.Sequential(
+            nn.ConvTranspose3d(in_channels=96, out_channels=96, kernel_size=(3, 3, 5)), 
+            nn.GELU(),
+            nn.BatchNorm3d(96),
+            nn.Upsample(scale_factor=(2, 2, 2)),
+            nn.ConvTranspose3d(in_channels=96, out_channels=64, kernel_size=(3, 3, 4), padding=(1, 1, 0)), 
+            nn.GELU(),
+            nn.BatchNorm3d(64),
+            nn.Upsample(scale_factor=(3, 3, 3)),
+            nn.ConvTranspose3d(in_channels=64, out_channels=48, kernel_size=(5, 5, 5)), 
+            nn.GELU(),
+            nn.BatchNorm3d(48),
+            nn.ConvTranspose3d(in_channels=48, out_channels=48, kernel_size=(5, 5, 5)), 
+            nn.GELU(),
+            nn.BatchNorm3d(48),
+            nn.ConvTranspose3d(in_channels=48, out_channels=1, kernel_size=(3, 3, 10), stride=(1, 1, 10)), 
+        )
+
+    def forward(self, x):
+        x = self.fc_layers(x)
+        x = x.view(-1, 96, 1, 1, 1)  # Reshape to match the spatial dimensions needed for ConvTranspose3d
+        x = self.upconv_layers(x)
+        return x
+
 
 # out_dim is a bit clunky, better option will be added soon
 # in: (batch_dim, event_dim) ; out: (batch_dim, event_dim)

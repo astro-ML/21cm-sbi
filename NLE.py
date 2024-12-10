@@ -19,7 +19,7 @@ class NLEHandler(NPEHandler):
             self.posterior_constructed = True
         return self.density_estimator.sample(num_samples=num_samples, x=x)
 
-    def loss(self, img, lab, rnge):                  
+    def loss(self, img, lab, rnge):              
         # computing loss
         loss = self.density_estimator.loss(img, cond=lab)
         loss = loss.mean(0)

@@ -306,7 +306,7 @@ def convert_pt_to_2dps(path: str, prefix: str = "", debug: bool = False,
                 })
 
                 user_params = p21c.UserParams(
-                    HII_DIM=summary_statistics_parameters['HII_DIM'], 
+                    HII_DIM=summary_statistics_parameters['HII_DIM'],
                     BOX_LEN=summary_statistics_parameters['BOX_LEN'], KEEP_3D_VELOCITIES=False
                 )
 
