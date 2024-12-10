@@ -290,7 +290,7 @@ class SNHandler:
             num_samples=50,
             scheduler=ASHAScheduler(metric="loss", mode="min"),
             search_alg=hyperopt_search,
-            resources_per_trial={"gpu": 1, "cpu": 6},
+            resources_per_trial={"gpu": 1, "cpu": 1},
         )
         #results = tuner.fit()
 
