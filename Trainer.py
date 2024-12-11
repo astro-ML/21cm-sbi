@@ -153,7 +153,7 @@ class Trainer:
                     test_loss_de_tmp += loss_de.mean().item()
                     test_loss_sn_tmp += loss_sn.mean().item()
                 
-                info(f"Epoch {epoch} finished. Testloss DE: {test_loss_de_tmp}, Testloss SN: {test_loss_sn_tmp}")
+                info(f"Epoch {epoch} finished. Testloss DE: {test_loss_de_tmp / len(self.test_data)}, Testloss SN: {test_loss_sn_tmp / len(self.test_data)}")
                 
                 train_loss_de.append(train_loss_de_tmp / len(self.training_data))
                 test_loss_de.append(test_loss_de_tmp / len(self.test_data))
@@ -172,7 +172,7 @@ class Trainer:
                             checkpoint = Checkpoint.from_directory(temp_checkpoint_dir)
 
                         # Send the current training result back to Tune
-                        train.report({"loss": test_loss_de_tmp}, checkpoint=checkpoint)
+                        train.report({"loss": test_loss_de[-1]}, checkpoint=checkpoint)
                     
                 bar()
                 

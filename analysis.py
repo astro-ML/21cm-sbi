@@ -520,6 +520,24 @@ class Analysis:
                 plt.show()
         
         torch.cuda.empty_cache()
+        
+    def check_latent_space(self, num_points: int = 200):
+        labels,prior_samples,_ = self.sampler(num_samples=num_points, sumnet=True)
+
+        z, _ = self.trainer.de_net(labels.to(self.device), prior_samples.to(self.device))
+        z = z.detach().cpu().numpy()
+
+        plt.figure(figsize=(8, 6))
+        data = {key: value for key, value in zip(self.labels, z.T)}
+        sns.histplot(data=data, element="step", kde=True)
+        if self.save:
+            plt.savefig(self.path + self.filename + "_latent_space.png", dpi=320)
+        else:
+            plt.show()
+            
+        
+        torch.cuda.empty_cache()
+        
                 
     def person_coeff_conditionals(self, num_points: int = 32, num_samples_stat = 200):
         _,prior_samples,_ = self.sampler(num_samples=num_points, sumnet=True)
