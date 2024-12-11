@@ -436,7 +436,7 @@ class SNHandler:
             loss = fffloss.fff_loss(img, self.encoder, self.decoder, self.latent_dist, self.beta)
             #z = self.encoder(img)
         else:
-            z = self.encoder(img)
+            z = self.encoder(img, rnge)
             loss = nn.MSELoss(reduction='none')(z, lab).mean(0)
         return z, loss
         

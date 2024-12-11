@@ -226,7 +226,7 @@ class Summary_net_lc_super_smol(nn.Module):
             nn.Sigmoid()
         )
     
-    def forward(self, x):
+    def forward(self, x,cond=None):
         x = self.conv_layers(x)
         x = self.pooling(x)
         x = torch.flatten(x, 1, -1)
