@@ -188,32 +188,28 @@ class Summary_net_lc_super_smol(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv_layers = nn.Sequential(
-            nn.Conv3d(in_channels=1, out_channels=48, kernel_size=(3, 3, 10), stride=(1, 1, 10)), 
+            nn.Conv3d(in_channels=1, out_channels=48, kernel_size=(3, 3, 10), stride=(1, 1, 10), padding=0), 
             nn.GELU(),
             nn.BatchNorm3d(48),
-            nn.Conv3d(in_channels=48, out_channels=48, kernel_size=(3, 3, 3)), 
+            nn.Conv3d(in_channels=48, out_channels=48, kernel_size=(3, 3, 5), stride=(1, 1, 2), padding=(0,0,2)), 
             nn.GELU(),
             nn.BatchNorm3d(48),
-            nn.MaxPool3d(kernel_size=(2, 2, 2)),
-            nn.Conv3d(in_channels=48, out_channels=64, kernel_size=(3, 3, 3)), 
+            nn.MaxPool3d(kernel_size=2, stride=2),
+            nn.Conv3d(in_channels=48, out_channels=64, kernel_size=(3, 3, 3), padding=0), 
             nn.GELU(),
             nn.BatchNorm3d(64),
-            nn.ZeroPad2d((1, 1, 0, 0)),  # Padding for width and height only, no depth padding
-            nn.Conv3d(in_channels=64, out_channels=96, kernel_size=(3, 3, 3)), 
+            #nn.ZeroPad2d((1, 1, 0, 0)),  # Padding for width and height only, no depth padding
+            nn.Conv3d(in_channels=64, out_channels=96, kernel_size=(3, 3, 3), padding=0), 
             nn.GELU(),
             nn.BatchNorm3d(96),
             nn.MaxPool3d(kernel_size=(2, 2, 2)),
-            nn.Conv3d(in_channels=96, out_channels=96, kernel_size=(3, 3, 3)), 
+            nn.Conv3d(in_channels=96, out_channels=128, kernel_size=(2, 2, 2), padding=0, stride=2), 
             nn.GELU(),
-            nn.BatchNorm3d(96),
+            nn.BatchNorm3d(128),
+            nn.MaxPool3d(kernel_size=(2, 2, 2)),
         )
-        self.pooling = nn.Sequential(
-            nn.MaxPool3d(kernel_size=(1,1,4), stride=(1,1,4), padding=0),
-            nn.AvgPool3d(kernel_size=2, stride=2, padding=0)
-        )
-        
         self.fc_layers = nn.Sequential(
-            nn.Linear(96, 96),  # Adjusted input dimension
+            nn.Linear(128, 96),  # Adjusted input dimension
             nn.Dropout(0.1),
             nn.GELU(),
             nn.Linear(96, 64),
@@ -228,7 +224,6 @@ class Summary_net_lc_super_smol(nn.Module):
     
     def forward(self, x,cond=None):
         x = self.conv_layers(x)
-        x = self.pooling(x)
         x = torch.flatten(x, 1, -1)
         x = self.fc_layers(x)
         return x

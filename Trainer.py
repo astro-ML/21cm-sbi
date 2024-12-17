@@ -100,8 +100,9 @@ class Trainer:
                 # initialize optimizer
                 if epoch == freezed_epochs:
                     info("Initialize optimizer for joint training...")
-                    self.optimizer = config["optimizer"](list(self.sn_net.parameters()) + list(self.de_net.parameters()),  **config["optimizer_kwargs"])
-                    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=epochs)
+                    #self.optimizer = config["optimizer"](list(self.de_net.parameters()) + list(self.sn_net.parameters()),  **config["optimizer_kwargs"])
+                    self.optimizer.add_param_group({"params": self.sn_net.parameters()})
+                    #lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=epochs-freezed_epochs)
 
                 self.de_net.train()
                 if epoch < freezed_epochs:
@@ -423,7 +424,7 @@ class SNHandler:
             torch.save(self.decoder.state_dict(), path + "decoder.pt")
         
     def load(self, path: str = "./"):
-        self.encoder.load_state_dict(torch.load(path + "density_model.pt"))
+        self.encoder.load_state_dict(torch.load(path + "encoder.pt"))
         self.encoder.to(self.device)
         self.encoder.eval()
         if self.use_dec:

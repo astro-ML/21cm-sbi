@@ -165,7 +165,7 @@ class Analysis:
         if self.save: 
             fig.savefig(self.path + f"{self.filename}_rank.png", dpi=400)
         fig.show()
-        fig.clf()
+
         torch.cuda.empty_cache()
         
 

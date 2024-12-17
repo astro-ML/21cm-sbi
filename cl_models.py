@@ -94,7 +94,7 @@ class RNVP(nn.Module):
             z, jac = self.net(x, c=[condition], rev=False)
         else:
             z, jac = self.net(x, rev=False)
-        p = 0.5*torch.sum(z**2,1) - jac
+        p = 0.5*torch.sum(z**2,-2) - jac
         
         if len(xshape) > 2:
             p = p.reshape(xshape[0], xshape[1])
