@@ -336,7 +336,7 @@ class SNHandler:
                     img = img.to(self.device)
                     lab = lab.to(self.device)
                     rnge = rnge.to(self.device)
-                    x, loss_sn = self.loss(img, lab, rnge)
+                    loss_sn = self.loss(img, lab, rnge)
                     loss_sn = loss_sn.mean()
                     loss_sn.backward()
                     self.optimizer.step()
@@ -352,7 +352,7 @@ class SNHandler:
                     img = img.to(self.device)
                     lab = lab.to(self.device)
                     rnge = rnge.to(self.device)
-                    x,loss_sn = self.loss(img,lab, rnge)
+                    loss_sn = self.loss(img,lab, rnge)
                     loss_sn = loss_sn.mean()
                     losstest_tmp += loss_sn.item()
                 losstest.append(losstest_tmp / len(test_data))
@@ -439,7 +439,7 @@ class SNHandler:
         else:
             z = self.encoder(img, rnge)
             loss = nn.MSELoss(reduction='none')(z, lab).mean(0)
-        return z, loss
+        return loss
         
         
 ### Depricated, will removed in the future ###

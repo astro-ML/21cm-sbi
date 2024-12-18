@@ -275,11 +275,13 @@ class global_temp_smol_inv_super_smol(nn.Module):
     def __init__(self, in_dim = 6, out_dim = 470):
         super().__init__()
         self.fc_layers = nn.Sequential(
-            nn.Linear(in_dim, 12),
+            nn.Linear(in_dim, 32),
             nn.GELU(),
-            nn.Linear(12, 24),
+            nn.Linear(32, 48),
             nn.GELU(),
-            nn.Linear(24, 48),
+            nn.Linear(48, 64),
+            nn.GELU(),
+            nn.Linear(64, 92),
             nn.GELU(),
         )
         self.unpooling = nn.Sequential(
@@ -309,7 +311,7 @@ class global_temp_smol_inv_super_smol(nn.Module):
             nn.Conv1d(in_channels=1, out_channels=1, kernel_size=1, stride =1, padding=0),
         )
 
-    def forward(self, x,c):
+    def forward(self, x,c=None):
         x = self.fc_layers(x)
         x = x.unsqueeze(-2)
         x = self.unpooling(x)
@@ -321,42 +323,48 @@ class Summary_net_lc_super_smol_inv(nn.Module):
     def __init__(self):
         super().__init__()
         self.fc_layers = nn.Sequential(
-            nn.Linear(6, 32),
+            nn.Linear(6, 16),
+            nn.GELU(),
+            nn.Linear(16, 32),
             nn.GELU(),
             nn.Linear(32, 64),
             nn.GELU(),
             nn.Linear(64, 96),
             nn.GELU(),
-            nn.Linear(96, 96),
-            nn.GELU(),
         )
         self.unpooling = nn.Sequential(
-            nn.Upsample(scale_factor=(2, 2, 2), mode='nearest'),
-            nn.Conv3d(in_channels=96, out_channels=96, kernel_size=(3, 3, 3)),
+            nn.Upsample(size=(2,2,2), mode='trilinear'),
+            nn.Conv3d(in_channels=96, out_channels=96, kernel_size=(3, 3, 3), padding=1),
             nn.GELU(),
             nn.BatchNorm3d(96),
-            nn.Upsample(scale_factor=(1, 1, 4), mode='nearest'),
-            nn.Conv3d(in_channels=96, out_channels=64, kernel_size=(3, 3, 3)),
+            nn.Upsample(size=(4,4,4), mode='trilinear'),
+            nn.Conv3d(in_channels=96, out_channels=64, kernel_size=(3, 3, 3), padding=1),
             nn.GELU(),
             nn.BatchNorm3d(64),
-            nn.Upsample(scale_factor=(2, 2, 2), mode='nearest'),
-            nn.Conv3d(in_channels=64, out_channels=48, kernel_size=(3, 3, 3)),
+            nn.Upsample(size=(8,8,8), mode='trilinear'),
+            nn.Conv3d(in_channels=64, out_channels=48, kernel_size=(3, 3, 3), padding=1),
             nn.GELU(),
             nn.BatchNorm3d(48),
-            nn.Upsample(scale_factor=(2, 2, 2), mode='nearest'),
-            nn.Conv3d(in_channels=48, out_channels=48, kernel_size=(3, 3, 3)),
+            nn.Upsample(size=(16,16,16), mode='trilinear'),
+            nn.Conv3d(in_channels=48, out_channels=48, kernel_size=(3, 3, 3), padding=1),
+            nn.GELU(),
+            nn.BatchNorm3d(48),
+            nn.Upsample(size=(16,16,16), mode='trilinear'),
+            nn.Conv3d(in_channels=48, out_channels=48, kernel_size=(3, 3, 3), padding=1),
             nn.GELU(),
             nn.BatchNorm3d(48),
         )
         self.conv_layers = nn.Sequential(
-            nn.Upsample(scale_factor=(2, 2, 2), mode='nearest'),
-            nn.Conv3d(in_channels=48, out_channels=1, kernel_size=(3, 3, 10), stride=(1, 1, 10)),
+            nn.Upsample(size=(28,28,470), mode='trilinear'),
+            nn.Conv3d(in_channels=48, out_channels=32, kernel_size=(3, 3, 11), stride=(1, 1, 1), padding=(1,1,5)),
+            nn.GELU(),
+            nn.Conv3d(in_channels=32, out_channels=1, kernel_size=(3, 3, 11), stride=(1, 1, 1), padding=(1,1,5)),
             nn.GELU()
         )
 
-    def forward(self, x,c):
+    def forward(self, x,c=None):
         x = self.fc_layers(x)
-        x = x.view(x.size(0), -1, 1, 1, 1)
+        x = x.view(-1, 96, 1, 1, 1) 
         x = self.unpooling(x)
         x = self.conv_layers(x)
         return x
