@@ -121,7 +121,8 @@ class Trainer:
                     img, lab, rnge = img.to(self.device), lab.to(self.device), rnge.to(self.device)
 
                     
-                    img, losssn = self.sn_net.loss(img, lab, rnge)
+                    losssn = self.sn_net.loss(img, lab, rnge)
+                    img = self.sn_net.encoder(img, rnge)
                     loss_de = self.de_net.loss(img, lab, rnge)
                     if self.use_dec:
                         loss = loss_de.mean() + losssn.mean()
@@ -148,7 +149,8 @@ class Trainer:
                 for lab, img, rnge in self.test_data:
                     img, lab, rnge = img.to(self.device), lab.to(self.device), rnge.to(self.device)
                     
-                    img, loss_sn = self.sn_net.loss(img, lab, rnge)
+                    loss_sn = self.sn_net.loss(img, lab, rnge)
+                    img = self.sn_net.encoder(img, rnge)
                         
                     loss_de = self.de_net.loss(img, lab, rnge)
                     test_loss_de_tmp += loss_de.mean().item()

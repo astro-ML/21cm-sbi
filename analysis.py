@@ -122,6 +122,47 @@ class Analysis:
         self.trainer.de_net.to(self.device)
         torch.cuda.empty_cache()
 
+    def run_map_distance(self, num_samples: int = 1000,):
+        
+        #mp = True if num_workers > 1 else False
+        # run sbc on full Validation Dataset
+        lengthd = len(self.valdat.dataset)
+        info("Run SBC...")
+        batch_size = self.valdat.batch_size
+        with alive_bar(len(self.valdat), force_tty=True, refresh_secs=1) as bar:
+            with torch.no_grad():
+                for k, (lab, img, rnge) in enumerate(self.valdat):
+                    img, lab, rnge = img.to(self.device), lab.to(self.device), rnge.to(self.device)
+
+                    pred = self.trainer.sn_net(img, rnge)
+                    if k == 0:
+                        ranks = torch.empty((lengthd, *pred.shape[1:]))
+                    # sbc rank stat
+                    for i in range(pred.shape[0]):
+                        with torch.no_grad():
+                            samples = self.trainer.de_net.sample(x = pred[i].unsqueeze(0), 
+                        num_samples=num_samples,
+                        sample_kwargs=self.posterior_kwargs).detach().cpu()
+                        for j in range(pred.shape[1]):
+                            ranks[k*batch_size + i,j] = np.mean(samples[:,j]) - lab[i,j]
+                    bar()
+                
+        # plot rank statistics
+        ranks = ranks.cpu().numpy()
+        labels_txt = [r"$M_\text{WDM}$", r"$\Omega_m$", r"$L_X$", r"$E_0$", r"$T_\text{vir, ion}$", r"$\zeta$"]
+        fig, ax = plt.subplots(1,lab.shape[1], figsize=(5*lab.shape[1],5))
+        for i in range(lab.shape[1]):
+            ax[i].hist(ranks[:,i], bins='auto', range=(0, num_samples), density=True)
+            ax[i].set_title(f"{labels_txt[i]}")
+            ax[i].set_xlabel("MAP distance")
+            #kde = gaussian_kde(ranks[:,i])
+            #xx = np.linspace(0, num_samples, num_samples)
+            #ax[i].plot(xx, kde(xx), c='orange')
+        if self.save: 
+            fig.savefig(self.path + f"{self.filename}_map-dist.png", dpi=400)
+        fig.show()
+
+        torch.cuda.empty_cache()
 
 
     def run_sbc(self, num_samples: int = 1000,):
@@ -159,9 +200,9 @@ class Analysis:
             ax[i].hist(ranks[:,i], bins='auto', range=(0, num_samples), density=True)
             ax[i].set_title(f"{labels_txt[i]}")
             ax[i].set_xlabel("Rank")
-            kde = gaussian_kde(ranks[:,i])
-            xx = np.linspace(0, num_samples, num_samples)
-            ax[i].plot(xx, kde(xx), c='orange')
+            #kde = gaussian_kde(ranks[:,i])
+            #xx = np.linspace(0, num_samples, num_samples)
+            #ax[i].plot(xx, kde(xx), c='orange')
         if self.save: 
             fig.savefig(self.path + f"{self.filename}_rank.png", dpi=400)
         fig.show()
