@@ -38,3 +38,4 @@ ppc.py
 !analysis.py
 tmp
 *.npy
+plots
