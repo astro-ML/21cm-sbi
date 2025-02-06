@@ -37,3 +37,4 @@ ppc.py
 !Trainer.py
 !analysis.py
 tmp
+*.npy

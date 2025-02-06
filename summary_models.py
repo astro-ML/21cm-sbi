@@ -97,20 +97,15 @@ class Summary_net_lc_smol(nn.Module):
                  init_layers = {
             "layer_size1": 1,
             "channel1": 48,
-            "kernel_size1_xy": 3,
-            "kernel_size1_z": 15,
             
             "layer_size2": 1,
             "channel2": 48,
-            "kernel_size2": 3,
             
             "layer_size3": 1,
             "channel3": 64,
-            "kernel_size3": 3,
             
             "layer_size4": 1,
             "channel4": 96,
-            "kernel_size4": 3,
         }):
         super().__init__()
         
@@ -118,12 +113,13 @@ class Summary_net_lc_smol(nn.Module):
             setattr(self, f"layercount{j}", init_layers[f"layer_size{j}"])
             
             out_channels = init_layers[f"channel{j}"]
+            # first layer
             if j == 1:
-                kernel_size = torch.tensor([init_layers[f"kernel_size{j}_xy"],init_layers[f"kernel_size{j}_xy"],init_layers[f"kernel_size{j}_z"]])
-                stride = 1
-                padding = torch.tensor([init_layers[f"kernel_size{j}_xy"],init_layers[f"kernel_size{j}_xy"],init_layers[f"kernel_size{j}_z"]])
+                kernel_size = torch.tensor([3,3,17])
+                stride = torch.tensor([1,1,17])
+                padding = torch.tensor([1,1,0])
             else:
-                kernel_size = torch.tensor([init_layers[f"kernel_size{j}"],init_layers[f"kernel_size{j}"],init_layers[f"kernel_size{j}"]])
+                kernel_size = torch.tensor([3,3,3])
                 padding = (kernel_size/2).to(torch.int32)
                 stride = 1
                 in_channels = init_layers[f"channel{j-1}"]
@@ -175,7 +171,7 @@ class Summary_net_lc_smol(nn.Module):
             x = x * getattr(self, f'cond_coup{j}')(x)
             x = getattr(self, f'pool{j}')(x)
             #print(f"After pool{j}, x shape: {x.shape}")
-            
+            print(f"{j}: {x.shape}")
         x = torch.mean(x, dim=(2,3,4))
         
         x = torch.flatten(x, 1, -1)
@@ -336,20 +332,41 @@ class Summary_net_lc_super_smol_inv(nn.Module):
             nn.Upsample(size=(2,2,2), mode='trilinear'),
             nn.Conv3d(in_channels=96, out_channels=96, kernel_size=(3, 3, 3), padding=1),
             nn.GELU(),
+            
+            nn.Conv3d(in_channels=96, out_channels=96, kernel_size=(3, 3, 3), padding=1),
+            nn.GELU(),
             nn.BatchNorm3d(96),
+            
+            
             nn.Upsample(size=(4,4,4), mode='trilinear'),
+            nn.Conv3d(in_channels=96, out_channels=96, kernel_size=(3, 3, 3), padding=1),
+            nn.GELU(),
+            
             nn.Conv3d(in_channels=96, out_channels=64, kernel_size=(3, 3, 3), padding=1),
             nn.GELU(),
             nn.BatchNorm3d(64),
+            
+            
             nn.Upsample(size=(8,8,8), mode='trilinear'),
+            nn.Conv3d(in_channels=64, out_channels=64, kernel_size=(3, 3, 3), padding=1),
+            nn.GELU(),
+            
             nn.Conv3d(in_channels=64, out_channels=48, kernel_size=(3, 3, 3), padding=1),
             nn.GELU(),
             nn.BatchNorm3d(48),
-            nn.Upsample(size=(16,16,16), mode='trilinear'),
+            
+            nn.Upsample(size=(12,12,12), mode='trilinear'),
+            nn.Conv3d(in_channels=48, out_channels=48, kernel_size=(3, 3, 3), padding=1),
+            nn.GELU(),
+            
             nn.Conv3d(in_channels=48, out_channels=48, kernel_size=(3, 3, 3), padding=1),
             nn.GELU(),
             nn.BatchNorm3d(48),
+            
             nn.Upsample(size=(16,16,16), mode='trilinear'),
+            nn.Conv3d(in_channels=48, out_channels=48, kernel_size=(3, 3, 3), padding=1),
+            nn.GELU(),
+            
             nn.Conv3d(in_channels=48, out_channels=48, kernel_size=(3, 3, 3), padding=1),
             nn.GELU(),
             nn.BatchNorm3d(48),
@@ -358,8 +375,11 @@ class Summary_net_lc_super_smol_inv(nn.Module):
             nn.Upsample(size=(28,28,470), mode='trilinear'),
             nn.Conv3d(in_channels=48, out_channels=32, kernel_size=(3, 3, 11), stride=(1, 1, 1), padding=(1,1,5)),
             nn.GELU(),
-            nn.Conv3d(in_channels=32, out_channels=1, kernel_size=(3, 3, 11), stride=(1, 1, 1), padding=(1,1,5)),
-            nn.GELU()
+            nn.BatchNorm3d(32),
+            nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(3, 3, 11), stride=(1, 1, 1), padding=(1,1,5)),
+            nn.GELU(),
+            nn.Conv3d(in_channels=32, out_channels=1, kernel_size=(3, 3, 3), stride=(1, 1, 1), padding=(1,1,1)),
+            nn.GELU(),
         )
 
     def forward(self, x,c=None):

@@ -35,7 +35,6 @@ class NPEHandler:
         return self.density_estimator.inverse(lab, cond)
     
     def log_prob(self, lab, cond=None):
-        print(lab, cond)
         return self.density_estimator.log_prob(lab, cond)
     
     def sample(self, num_samples: int, x, sample_kwargs: dict = None):
@@ -45,7 +44,7 @@ class NPEHandler:
         torch.save(self.density_estimator.state_dict(), path + "density_model.pt")
         
     def load(self, path: str = "./"):
-        self.density_estimator.load_state_dict(torch.load(path + "density_model.pt"))
+        self.density_estimator.load_state_dict(torch.load(path + "density_model.pt", map_location=torch.device(self.device)))
         self.density_estimator.to(self.device)
         self.density_estimator.eval()
 

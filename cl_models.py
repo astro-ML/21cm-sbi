@@ -187,7 +187,59 @@ class NSF_CL(nn.Module):
         return torch.cat([lower, upper], dim = 1), log_det
     
     
-    
+class LinearBatchNorm(nn.Module):
+    """
+    An (invertible) batch normalization layer.
+    This class is mostly inspired from this one:
+    https://github.com/kamenbliznashki/normalizing_flows/blob/master/maf.py
+    """
+
+    def __init__(self, input_size, momentum=0.9, eps=1e-5):
+        super().__init__()
+        self.momentum = momentum
+        self.eps = eps
+
+        self.log_gamma = nn.Parameter(torch.zeros(input_size))
+        self.beta = nn.Parameter(torch.zeros(input_size))
+
+        self.register_buffer('running_mean', torch.zeros(input_size))
+        self.register_buffer('running_var', torch.ones(input_size))
+
+    def forward(self, x, **kwargs):
+        if self.training:
+            self.batch_mean = x.mean(0)
+            self.batch_var = x.var(0)
+
+            self.running_mean.mul_(self.momentum).add_(self.batch_mean.data * (1 - self.momentum))
+            self.running_var.mul_(self.momentum).add_(self.batch_var.data * (1 - self.momentum))
+
+            mean = self.batch_mean
+            var = self.batch_var
+        else:
+            mean = self.running_mean
+            var = self.running_var
+
+        x_hat = (x - mean) / torch.sqrt(var + self.eps)
+        y = self.log_gamma.exp() * x_hat + self.beta
+
+        log_det = self.log_gamma - 0.5 * torch.log(var + self.eps)
+
+        return y, log_det.expand_as(x).sum(1)
+
+    def backward(self, x, **kwargs):
+        if self.training:
+            mean = self.batch_mean
+            var = self.batch_var
+        else:
+            mean = self.running_mean
+            var = self.running_var
+
+        x_hat = (x - self.beta) * torch.exp(-self.log_gamma)
+        x = x_hat * torch.sqrt(var + self.eps) + mean
+
+        log_det = 0.5 * torch.log(var + self.eps) - self.log_gamma
+
+        return x, log_det.expand_as(x).sum(1)
     
 def unconstrained_rational_quadratic_spline(
     inputs,

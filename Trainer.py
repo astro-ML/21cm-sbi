@@ -125,7 +125,7 @@ class Trainer:
                     img = self.sn_net.encoder(img, rnge)
                     loss_de = self.de_net.loss(img, lab, rnge)
                     if self.use_dec:
-                        loss = loss_de.mean() + losssn.mean()
+                        loss = losssn.mean()
                     else:
                         loss = loss_de.mean()
                     train_loss_sn_tmp += losssn.mean().item()
@@ -216,22 +216,22 @@ class Trainer:
         torch.save(results.results, "./opt_results.pt")
         
     def save_model(self, path: str = "./"):
-        self.de_net.save(path + "density_model.pt")
-        self.sn_net.save(path + "summary_model.pt")
+        self.de_net.save(path)
+        self.sn_net.save(path)
 
     def load_model(self, path: str = "./"):
-        self.de_net.load(path + "density_model.pt")
+        self.de_net.load(path)
         self.de_net.to(self.device)
         self.de_net.eval()
-        self.sn_net.load(path + "summary_model.pt")
+        self.sn_net.load(path)
         self.sn_net.to(self.device)
         self.sn_net.eval()
 
     def plot(self, filename: str):
         plt.plot(np.arange(len(self.train_loss_de))+1, self.train_loss_de, label='Trainingsloss DE', alpha=0.5)
         plt.plot(np.arange(len(self.test_loss_de)), self.test_loss_de, label='Testloss DE')
-        plt.plot(np.arange(len(self.train_loss_sn)), self.train_loss_sn, label='Trainingsloss SN', alpha=0.5)
-        plt.plot(np.arange(len(self.test_loss_sn)), self.test_loss_sn, label='Testloss SN')
+        plt.plot(np.arange(len(self.train_loss_sn)), np.log10(self.train_loss_sn), label='Log Trainingsloss SN', alpha=0.5)
+        plt.plot(np.arange(len(self.test_loss_sn)), np.log10(self.test_loss_sn), label='Log Testloss SN')
         plt.xlabel("epochs")
         plt.ylabel("log loss")
         plt.title("Log loss during training")
@@ -247,6 +247,7 @@ class SNHandler:
                  encoder_kwargs: dict = {},
                  decoder = None,
                  decoder_kwargs: dict = {},
+                 latent_dist = torch.distributions.Normal(0,1),
                  device = 'cuda',
                  no_progress_bar = False,
                  beta: float = 1.0):
@@ -258,7 +259,7 @@ class SNHandler:
         self.opti_hype = False
         self.no_progress_bar = no_progress_bar
         self.beta = beta
-        self.latent_dist = torch.distributions.Normal(0,1)
+        self.latent_dist = latent_dist
         
         info("Succesfully initialized SNHandler")
 
@@ -426,17 +427,17 @@ class SNHandler:
             torch.save(self.decoder.state_dict(), path + "decoder.pt")
         
     def load(self, path: str = "./"):
-        self.encoder.load_state_dict(torch.load(path + "encoder.pt"))
+        self.encoder.load_state_dict(torch.load(path + "encoder.pt", map_location=torch.device(self.device)))
         self.encoder.to(self.device)
         self.encoder.eval()
         if self.use_dec:
-            self.decoder.load_state_dict(torch.load(path + "decoder.pt"))
+            self.decoder.load_state_dict(torch.load(path + "decoder.pt", map_location=torch.device(self.device)))
             self.decoder.to(self.device)
             self.decoder.eval()
 
     def loss(self, img, lab, rnge):
         if self.use_dec:
-            loss = fffloss.fff_loss(img, self.encoder, self.decoder, self.latent_dist, self.beta)
+            loss = fffloss.fff_loss(img, self.encoder, self.decoder, lab, self.latent_dist, self.beta)
             #z = self.encoder(img)
         else:
             z = self.encoder(img, rnge)
