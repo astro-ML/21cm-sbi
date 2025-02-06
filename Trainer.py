@@ -204,7 +204,7 @@ class Trainer:
         hyperopt_search = HyperOptSearch(search_space, metric="loss", mode="min")
         results = tune.run(
             tune.with_parameters(self.train, **train_kwargs),
-            num_samples=10,
+            num_samples=100,
             scheduler=ASHAScheduler(metric="loss", mode="min"),
             search_alg=hyperopt_search,
             resources_per_trial={"GPU": 1},

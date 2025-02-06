@@ -20,7 +20,7 @@ DEFAULT_MIN_DERIVATIVE = 1e-3
 class RNVP(nn.Module):
     def __init__(self, in_dim: int, n_blocks: int, n_nodes: int, cond_dim: int = 6,
                  hidden_layer = 1, batch_norm: bool = False, 
-                 activation = 'relu', device = 'cuda', epsilon = 1e-4):
+                 activation = 'relu', device = 'cuda', epsilon = 1e-3):
         super().__init__()
         self.in_dim = in_dim
         self.n_blocks = n_blocks

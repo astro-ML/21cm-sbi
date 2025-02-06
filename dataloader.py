@@ -92,19 +92,24 @@ class DataHandler():
         plt.show()
 
     def normalize(self, labels: torch.FloatTensor, images: torch.FloatTensor = None, 
-                  epsilon: float = 1e-4) -> tuple[torch.FloatTensor, ...]:
+                  epsilon: float = 1e-3) -> tuple[torch.FloatTensor, ...]:
         if images is not None:
             #print(f'{images.shape}')
             diff = images.max() - images.min()
             # normalize to [0,1]
             if diff != 0: images = (images - images.min()) / diff
-            # normalize to [0 + epsilon, 1 - epsilon]
-        labels = (labels - self.norm_range[:,0] + epsilon) / (self.norm_range[:,1] - self.norm_range[:,0] + 2*epsilon)
+        # normalize to [0,1]
+        labels = (labels - self.norm_range[:,0]) / (self.norm_range[:,1] - self.norm_range[:,0])
+        # rescale to [epsilon, 1-epsilon]
+        labels = epsilon + (1 - 2 * epsilon) * labels
         return (images, labels)
     
     def denormalize(self, labels: torch.FloatTensor,
-                  epsilon: float = 1e-4) -> torch.FloatTensor:
-        labels = labels * (self.norm_range[:,1] - self.norm_range[:,0] + 2*epsilon) + self.norm_range[:,0] - epsilon
+                  epsilon: float = 1e-3) -> torch.FloatTensor:
+        # rescale to [0,1]
+        labels = (labels - epsilon) / (1 - 2 * epsilon)
+        # denormalize
+        labels = labels * (self.norm_range[:,1] - self.norm_range[:,0]) + self.norm_range[:,0]
         return labels
 
 class mock_noise:

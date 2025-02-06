@@ -61,7 +61,7 @@ class BasicBlock(nn.Module):
 
 class ResNet(nn.Module):
     def __init__(self, in_dim, n_nodes, hidden_layer, batch_norm, n_blocks, K=4, gamma=1.0, activation_fn = nn.ReLU(),
-                 device = 'cuda', prior = BoxUniform):
+                 device = 'cuda', prior = BoxUniform, epsilon: float = 1e-3):
         super(ResNet, self).__init__()
         self.in_dim = in_dim
         self.classifier = []
