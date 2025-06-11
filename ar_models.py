@@ -5,12 +5,10 @@ import torch.distributions as D
 from made_backbone import MADE, BatchNorm, FlowSequential
 import torch.nn.init as init
 from cl_models import unconstrained_rational_quadratic_spline
-from summary_models import FCNN
 from math import sqrt
 from typing import Dict, Any
 from utility import get_nle_posterior
 from sbi.utils import BoxUniform
-
 
 class cond_FCL(nn.Linear):
     def __init__(self, in_dim, out_dim, cond_dim, activation_fn):
@@ -25,6 +23,40 @@ class cond_FCL(nn.Linear):
         if y is not None:
             out = out + F.linear(y, self.cond_weight)
         out = self.activation_fn(out)
+        return out
+
+# alternative conditional linear layer, which should be more expressive
+class CLinear(nn.Module):
+    def __init__(self, in_dim, out_dim, cond_dim, activation_fn, batch_norm):
+        super().__init__()
+        # Main linear layer (outputs twice the number of channels for GLU)
+        self.linear = nn.Linear(in_dim, out_dim * 2)
+
+        # Conditioning projection (maps cond_dim -> out_dim * 2)
+        self.cond_proj = nn.Linear(cond_dim, out_dim * 2)
+
+        self.activation_fn = activation_fn
+        self.batch_norm = nn.BatchNorm1d(out_dim) if batch_norm else nn.Identity()
+
+    def forward(self, x, cond):
+        """
+        x:     (batch, in_dim)
+        cond:  (batch, cond_dim)
+        """
+        linear_out = self.linear(x)  # (batch, out_dim * 2)
+
+        # Project conditioning vector
+        cond_out = self.cond_proj(cond)  # (batch, out_dim * 2)
+
+        # Add conditioning
+        out = linear_out + cond_out
+
+        # Split for GLU
+        a, b = out.chunk(2, dim=1)  # Split along channel dimension
+        out = a * torch.sigmoid(b)
+
+        out = self.activation_fn(out)
+        out = self.batch_norm(out)
         return out
     
 
@@ -139,13 +171,13 @@ class NSF_AR(nn.Module):
         self.register_buffer('base_dist_var', torch.ones(in_dim))
         self.device = device
         
-        self.condition_shape = torch.tensor([1,6])
+        self.condition_shape = torch.tensor([1,cond_dim])
         
         self.B = B
         self.reversed = False
         
         # hack in prior, bettor solution TBA
-        self.prior = BoxUniform(low=torch.zeros(6)+epsilon, high=torch.ones(6)-epsilon, device=device)
+        self.prior = BoxUniform(low=-torch.ones(cond_dim)+epsilon, high=torch.ones(cond_dim)-epsilon, device=device)
         
         # construct model
         modules = []
@@ -199,7 +231,7 @@ class NSF_AR(nn.Module):
         self.reversed = True
             
 
-    def sample(self, num_samples, x, sample_kwargs = None):
+    def sample(self, num_samples, x):
         if self.reversed:
             return self.posterior.sample((num_samples,), x, show_progress_bars=False)    
         else:
@@ -225,8 +257,8 @@ class MAF(nn.Module):
         self.device = device
         self.condition_shape = torch.Size((cond_dim,))
 
-        # Hack in prior, bettert oslution TBA
-        self.prior = BoxUniform(low=torch.zeros(6)+epsilon, high=torch.ones(6)-epsilon, device=device)
+        # Hack in prior, better solution TBA
+        self.prior = BoxUniform(low=-torch.ones(cond_dim)+epsilon, high=torch.ones(cond_dim)-epsilon, device=device)
         
         # construct model
         modules = []
@@ -256,8 +288,6 @@ class MAF(nn.Module):
             x = x.reshape(xshape[0] * xshape[1], xshape[2])
         elif len(xshape) > 3:
             raise ValueError(f"Shape of x is {x.shape} but is expected to be (sample_shape, batch_shape, event_shape) or (batch_shape, event_shape)") 
-        # only there to handle weird sbi package stuff
-        #print(x.shape, condition.shape)
         s, p = self.forward(x, condition)
         
         if len(xshape) > 2:
@@ -288,7 +318,4 @@ class MAF(nn.Module):
 
     def loss(self, x, cond=None):
         u, sum_log_abs_det_jacobians = self.forward(x, cond)
-        print(u.shape, sum_log_abs_det_jacobians.shape)
-        print(u, sum_log_abs_det_jacobians)
-        #print("base_dist: ", self.base_dist.log_prob(u).mean().item(), "jac: ", sum_log_abs_det_jacobians.mean().detach().item())
         return - torch.sum(self.base_dist.log_prob(u) + sum_log_abs_det_jacobians, dim=1)

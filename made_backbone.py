@@ -51,6 +51,7 @@ class MaskedLinear(nn.Linear):
         out = F.linear(x, self.weight * self.mask, self.bias)
         if y is not None:
             out = out + F.linear(y, self.cond_weight)
+            #out = out + F.glu(torch.cat((out, F.linear(y, self.cond_weight)), dim=1), dim=1) # doesnt really work
         return out
 
     def extra_repr(self):

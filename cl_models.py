@@ -4,11 +4,28 @@ import FrEIA.framework as Ff
 import FrEIA.modules as Fm
 from typing import Callable, List, Tuple
 import torch.nn.functional as F
-from summary_models import FCNN
 import numpy as np
 from typing import Dict, Any
 from utility import get_nle_posterior
 from sbi.utils import BoxUniform
+
+# input: (in_dim, out_dim, hidden_layer, n_nodes, activation, batch_norm)
+class FCNN(nn.Module):
+    """
+    Simple fully connected neural network.
+    """
+    def __init__(self, in_dim, out_dim, hidden_layer, n_nodes, activation, batch_norm,
+                 device):
+        super().__init__()
+        if batch_norm:
+            layers = [nn.Linear(in_dim, n_nodes), activation,nn.BatchNorm1d(n_nodes)] + [layer for _ in range(hidden_layer-1) for layer in (nn.Linear(n_nodes, n_nodes), activation, nn.BatchNorm1d(n_nodes))] + [nn.Linear(n_nodes, out_dim)]
+            self.network = nn.Sequential(*layers).to(device)
+        else:
+            layers = [nn.Linear(in_dim, n_nodes), activation] + [layer for _ in range(hidden_layer-1) for layer in (nn.Linear(n_nodes, n_nodes), activation)] + [nn.Linear(n_nodes, out_dim)]
+            self.network = nn.Sequential(*layers).to(device)
+
+    def forward(self, x):
+        return self.network(x)
 
 DEFAULT_MIN_BIN_WIDTH = 1e-3
 DEFAULT_MIN_BIN_HEIGHT = 1e-3
@@ -43,7 +60,7 @@ class RNVP(nn.Module):
         self.net = self.model(in_dim, n_blocks, n_nodes, cond_dim, hidden_layer, activation_fn).to(device)
         
         # Hack in prior, bettert oslution TBA
-        self.prior = BoxUniform(low=torch.zeros(in_dim)+epsilon, high=torch.ones(in_dim)-epsilon, device=device)
+        self.prior = BoxUniform(low=-torch.ones(in_dim)+epsilon, high=torch.ones(in_dim)-epsilon, device=device)
         
     def model(self, n_dim: int, n_blocks: int, n_nodes: int, cond_dims: int, hidden_layer: int,
               activation_fn: Callable) -> Ff.SequenceINN:
@@ -80,8 +97,8 @@ class RNVP(nn.Module):
                         subnet_constructor=subnet_fc, permute_soft=permute_soft)
         return flow
     
-    def forward(self, x, cond):
-        return self.net(x, c=[cond])
+    def forward(self, x, condition):
+        return self.net(x, c=[condition])
     
     def log_prob(self, x, condition=None):
         xshape = x.shape
@@ -90,8 +107,10 @@ class RNVP(nn.Module):
         elif len(xshape) > 3:
             raise ValueError(f"Shape of x is {x.shape} but is expected to be (sample_shape, batch_shape, event_shape) or (batch_shape, event_shape)") 
         # only there to handle weird sbi package stuff
-        
-        z, jac = self.net(x, c=[condition], rev=False)
+        if condition is not None:
+            z, jac = self.net(x, c=[condition], rev=False)
+        else:
+            z, jac = self.net(x, rev=False)
         p = 0.5*torch.sum(z**2,1) - jac
         
         if len(xshape) > 2:
@@ -111,20 +130,19 @@ class RNVP(nn.Module):
         self.reversed = True
             
 
-    def sample(self, num_samples, x, sample_kwargs = None):
+    def sample(self, num_samples, condition, sample_kwargs = None):
         if self.reversed:
-            return self.posterior.sample((num_samples,), x, show_progress_bars=False)    
+            return self.posterior.sample(num_samples, condition, show_progress_bars=False)    
         else:
-            z = torch.randn(num_samples, self.in_dim).to(self.device)
+            z = torch.randn(num_samples[0], self.in_dim).to(self.device)
             # add rejection sampling TODO
-            samples,_ = self.net(z, c = [x.repeat((num_samples,1)).to(self.device)], rev=True)
-            return samples
+            samples,_ = self.net(z, c = [condition.repeat((num_samples[0],1)).to(self.device)], rev=True)
+            return samples.unsqueeze(1)
     
-    def loss(self, x: torch.FloatTensor, cond: torch.FloatTensor) -> torch.FloatTensor:
-        z, jac = self.net(x, c=[cond], rev=False)
-        loss = 0.5*torch.sum(z**2,1) - jac
-        loss = loss.mean() / self.in_dim
-        return loss
+    def loss(self, x: torch.FloatTensor, condition: torch.FloatTensor) -> torch.FloatTensor:
+        z, jac = self.net(x, c=[condition], rev=False)
+        loss = 0.5*torch.mean(z**2,1) - jac
+        return loss / self.in_dim
 
 # modified version of https://github.com/tonyduan/normalizing-flows/blob/master/src/flows.py
 
@@ -185,7 +203,59 @@ class NSF_CL(nn.Module):
         return torch.cat([lower, upper], dim = 1), log_det
     
     
-    
+class LinearBatchNorm(nn.Module):
+    """
+    An (invertible) batch normalization layer.
+    This class is mostly inspired from this one:
+    https://github.com/kamenbliznashki/normalizing_flows/blob/master/maf.py
+    """
+
+    def __init__(self, input_size, momentum=0.9, eps=1e-5):
+        super().__init__()
+        self.momentum = momentum
+        self.eps = eps
+
+        self.log_gamma = nn.Parameter(torch.zeros(input_size))
+        self.beta = nn.Parameter(torch.zeros(input_size))
+
+        self.register_buffer('running_mean', torch.zeros(input_size))
+        self.register_buffer('running_var', torch.ones(input_size))
+
+    def forward(self, x, **kwargs):
+        if self.training:
+            self.batch_mean = x.mean(0)
+            self.batch_var = x.var(0)
+
+            self.running_mean.mul_(self.momentum).add_(self.batch_mean.data * (1 - self.momentum))
+            self.running_var.mul_(self.momentum).add_(self.batch_var.data * (1 - self.momentum))
+
+            mean = self.batch_mean
+            var = self.batch_var
+        else:
+            mean = self.running_mean
+            var = self.running_var
+
+        x_hat = (x - mean) / torch.sqrt(var + self.eps)
+        y = self.log_gamma.exp() * x_hat + self.beta
+
+        log_det = self.log_gamma - 0.5 * torch.log(var + self.eps)
+
+        return y, log_det.expand_as(x).sum(1)
+
+    def backward(self, x, **kwargs):
+        if self.training:
+            mean = self.batch_mean
+            var = self.batch_var
+        else:
+            mean = self.running_mean
+            var = self.running_var
+
+        x_hat = (x - self.beta) * torch.exp(-self.log_gamma)
+        x = x_hat * torch.sqrt(var + self.eps) + mean
+
+        log_det = 0.5 * torch.log(var + self.eps) - self.log_gamma
+
+        return x, log_det.expand_as(x).sum(1)
     
 def unconstrained_rational_quadratic_spline(
     inputs,
@@ -194,14 +264,14 @@ def unconstrained_rational_quadratic_spline(
     unnormalized_derivatives,
     inverse=False,
     tails="linear",
-    tail_bound=1.0,
+    tail_bound=1.5,
     min_bin_width=DEFAULT_MIN_BIN_WIDTH,
     min_bin_height=DEFAULT_MIN_BIN_HEIGHT,
     min_derivative=DEFAULT_MIN_DERIVATIVE,
     enable_identity_init=False,
     device='cpu'
 ):
-    offset = 0.5
+    offset = 0
     inside_interval_mask = (inputs >= -tail_bound+offset) & (inputs <= tail_bound+offset)
     outside_interval_mask = ~inside_interval_mask
 
@@ -365,3 +435,5 @@ def rational_quadratic_spline(
 def searchsorted(bin_locations, inputs, eps=1e-6):
     bin_locations[..., -1] += eps
     return torch.sum(inputs[..., None] >= bin_locations, dim=-1) - 1
+
+

@@ -1,5 +1,6 @@
 import h5py as h5
 import torch
+import sys, os
 import os, fnmatch
 from py21cmfast import compute_tau
 import numpy as np
@@ -20,6 +21,112 @@ from sbi.inference.posteriors.vi_posterior import VIPosterior
 from sbi.utils import mcmc_transform
 from py21cmfast_tools import calculate_ps
 from powerbox.tools import ignore_zero_absk
+my_module_path = os.path.join("../", '21cm-wrapper')
+sys.path.append(my_module_path)
+from Flower import Probability, find_nearest_index
+from multiprocessing import Pool
+from glob import glob
+from scipy.ndimage import zoom
+
+
+def downscale_file(args):
+    file, path = args
+
+    outfile_box = {}
+    outfile_ps1 = {}
+    outfile_ps2 = {}
+    try:
+        LC = torch.load(path + file)
+    except:
+        print(f"Error at {file}")
+        return 1
+    outfile_ps1["ps1d"] = LC['ps1d']
+    outfile_ps1["ps1d_var"] = LC['ps1d_var']
+    outfile_ps2["ps2d"] = LC['ps2d']
+    outfile_ps2["ps2d_var"] = LC['ps2d_var']
+    bt = LC['brightness_temp']
+    zoom_factors = (0.25, 0.25, 0.25)
+    bt = zoom(bt, zoom_factors, order=3)  # order=3 for cubic 
+    outfile_box["brightness_temp"] = torch.tensor(bt, dtype=torch.float32)
+    #outfile["L_X"] = LC.astro_params.L_X
+    #outfile["NU_X_THRESH"] = LC.astro_params.NU_X_THRESH
+    outfile_box["parameter"] = LC['parameter']
+    outfile_ps1["parameter"] = LC['parameter']
+    outfile_ps2["parameter"] = LC['parameter']
+    #outfile["HII_EFF_FACTOR"] = LC.astro_params.HII_EFF_FACTOR
+    torch.save(outfile_box, path + "tmp/" + f"data_smoll_box_{file.split('.')[0]}" + ".pt")
+    # hack for new data
+    torch.save(outfile_ps1, path + "tmp/" + f"data_ps1_{file.split('.')[0]}" + ".pt")
+    torch.save(outfile_ps2, path + "tmp/" + f"data_ps2_{file.split('.')[0]}" + ".pt")
+    return 0
+
+
+def process_file(args):
+    file, path, delete_old = args
+
+    outfile = {}
+    try:
+        LC = lc.read(path + file)
+    except:
+        print(f"Error at {file}")
+        return 1
+    
+    lc_zs = np.array(LC.lightcone_redshifts)
+    idx_low = find_nearest_index(lc_zs, 5.5)
+    idx_high = find_nearest_index(lc_zs, 10.)
+    bt = LC.brightness_temp[:, :, idx_low:idx_high]
+    LC.brightness_temp = bt
+    #1dps 
+    prob = Probability(prior_ranges={}, bins = np.linspace(0.1,1.5,15),
+                       z_eval = None, chunk_size = 140, chunk_skip = 140,
+                       summary_statistics='1dps')
+    ps1d, ps1d_var = prob.ps1d(LC)
+    #2dps 
+    prob = Probability(prior_ranges={}, bins = np.linspace(0.1,1.5,15),
+                       z_eval = None, chunk_size = 140, chunk_skip = 140,
+                       summary_statistics='2dps')   
+    ps2d, ps2d_var = prob.ps2d(LC)
+    
+    outfile["ps1d"] = torch.tensor(ps1d, dtype=torch.float32)
+    outfile["ps1d_var"] = torch.tensor(ps1d_var, dtype=torch.float32)
+    outfile["ps2d"] = torch.tensor(ps2d, dtype=torch.float32)
+    outfile["ps2d_var"] = torch.tensor(ps2d_var, dtype=torch.float32)
+    outfile["brightness_temp"] = torch.tensor(bt, dtype=torch.float32)
+    #outfile["L_X"] = LC.astro_params.L_X
+    #outfile["NU_X_THRESH"] = LC.astro_params.NU_X_THRESH
+    outfile["parameter"] = torch.tensor([
+        #LC.astro_params.ION_Tvir_MIN,
+        LC.astro_params.F_STAR10,
+        LC.astro_params.ALPHA_STAR,
+        LC.astro_params.F_ESC10,
+        LC.astro_params.ALPHA_ESC,
+        LC.astro_params.M_TURN,
+        LC.astro_params.t_STAR
+    ], dtype= torch.float32)
+    #outfile["HII_EFF_FACTOR"] = LC.astro_params.HII_EFF_FACTOR
+    torch.save(outfile, path + f"data_{file.split('.')[0]}" + ".pt")
+    if delete_old:
+        os.remove(path + file)
+    return 0
+
+def full_convert(path: str, delete_old: bool = False, threads: int = 1, split_factor = 1, split_part = 0):
+    files = fnmatch.filter(os.listdir(path), "*.h5")
+    files = np.array_split(files, split_factor)[split_part]
+    print(len(files))
+    with Pool(threads) as pool:
+        results = pool.map(process_file, [(file, path, delete_old) for file in files])
+    faulty_count = sum(results)
+    print(f"Done, {faulty_count} faulty files encountered")
+
+def full_down(path: str, threads: int = 1, split_factor = 1, split_part = 0):
+    files = fnmatch.filter(os.listdir(path), "*.pt")
+    files = np.array_split(files, split_factor)[split_part]
+    print(len(files))
+    with Pool(threads) as pool:
+        results = pool.map(downscale_file, [(file, path) for file in files])
+    faulty_count = sum(results)
+    print(f"Done, {faulty_count} faulty files encountered")
+
 
 def cutoff_to_z(redshift_cutoff: float, path: str, prefix: str = "") -> None:
     files = fnmatch.filter(os.listdir(path), prefix + "*")
@@ -93,109 +200,13 @@ def convert_to_torch_batch(path: str, prefix: str = "run_", check_for_nan: bool 
 
     print(f"Done, {len(nan_counter)} NaNs encountered in \n{nan_counter}")   
 
-def convert_to_torch(path: str, prefix: str = "run_", check_for_nan: bool = True, debug: bool = False, remove_zeros: bool = True,
-                     redshift_cutoff: int = 1175, statistics: bool = False) -> None:
+def convert_to_torch(path: str) -> None:
     '''Given a path and an optinal prefix 
     (e.g. only convert all files named as run_, set prefix = "run_")
     this function converts .h5 files from 21cmfastwrapper to the common .npz format'''
     # image, label, tau, gxH
     # search for all files given in a path given a prefix an loop over those
-    if statistics:
-        max_bt, min_bt, avg_bt, taus, zlc = ([] for i in range(5))
-    if remove_zeros or statistics:
-        zeros = []
-    files = fnmatch.filter(os.listdir(path), prefix + "*")
-    if debug: print(f"{files}")
-    nan_counter = []
-    # zix = 88 #cut_z_idx(np.asarray(h5.File(path + files[0], 'r')["node_redshifts"]), z_cut)
-    with alive_bar(len(files), force_tty=True) as fbar:
-        for i, file in enumerate(files):
-            if debug: print(f"load {path + file}")
-            f = h5.File(path + file, 'r')
-            img = torch.as_tensor(np.array(f['lightcones']['brightness_temp']), dtype=torch.float32)
-            # stuff good to know
-            if statistics and i % 10 == 0:
-                temp_lc = p21c.outputs.LightCone.read(path + file).lightcone_redshifts
-                zlc.append(temp_lc[redshift_cutoff])
-                zlc_min = temp_lc[0]
-            # load image
-            img = img[:,:,:redshift_cutoff]
-            # check if there are NaNs in the brightness map
-            if check_for_nan:
-                if torch.isnan(img).any():
-                    nan_counter.append(file)
-                    continue
-
-            # check for zero brightness_temp
-            if statistics or remove_zeros:
-                if not torch.any(img):
-                    zeros.append(file)
-                    if remove_zeros:
-                        continue
-
-            #load labels, WDM,OMm,LX,E0,Tvir,Zeta
-            f_glob, f_cosmo, f_astro = dict(f['_globals'].attrs), dict(f['cosmo_params'].attrs), dict(f['astro_params'].attrs), 
-            label = torch.as_tensor([
-                f_glob["M_WDM"],
-                f_cosmo["OMm"],
-                f_astro["L_X"],
-                f_astro["NU_X_THRESH"],
-                f_astro["ION_Tvir_MIN"],
-                f_astro["HII_EFF_FACTOR"]
-            ], dtype=torch.float32)
-
-            if debug: print(f'{label=}')
-            
-            # load redshift
-            redshifts = torch.as_tensor(f["node_redshifts"], dtype=torch.float32)
-            # cut_idx = cut_z_idx(redshifts, z_cut)
-            # compute tau
-            gxH=torch.flip(torch.as_tensor(f["global_quantities"]["xH_box"], dtype=torch.float32), dims=[0])#[:cut_idx]
-            redshifts= torch.flip(redshifts, dims=[0])#[:cut_idx]
-            #print(redshifts)
-            tau=torch.as_tensor(compute_tau(redshifts=redshifts,global_xHI=gxH), dtype=torch.float32)
-
-            if statistics:
-                max_bt.append(float(img.max()))
-                min_bt.append(float(img.min()))
-                avg_bt.append(float(img.mean()))
-                taus.append(float(tau))
-
-            new_format = {
-                "images": img,
-                "labels": label,
-                #"taus": tau,
-                #"zs": redshifts,
-                #"gxHs": gxH
-            }
-            #save to new format
-            torch.save(new_format, path + f"batch_{i}" + ".pt")
-            fbar()
-    if statistics:
-        plt.rcParams['text.usetex'] = True
-        fig, ax = plt.subplots(2, 3, figsize=(12, 8))
-        ax[0,0].hist(x = min_bt, bins = 10)
-        ax[0,0].set_xlabel(r"$\max \delta T$")
-        ax[0,1].hist(x = max_bt, bins = 10)
-        ax[0,1].set_xlabel(r"$\min \delta T$")
-        ax[1,0].hist(x = avg_bt, bins = 10)
-        ax[1,0].set_xlabel("avg" + r"$ \delta T$")
-        ax[1,1].hist(x = taus, bins = 10)
-        ax[1,1].set_xlabel(r"$\tau$")
-        ax[0,0].set_ylabel("count")
-        ax[1,0].set_ylabel("count")
-        ax[0,2].hist(x = zlc, bins = 10)
-        ax[0,2].set_xlabel(r"$\max z$")
-        ax[0,2].set_ylabel(f"count / mean={round(np.mean(zlc),2)} and zlc_min={round(zlc_min,2)}")
-        ax[1,2].axis("off")
-        
-        fig.tight_layout()
-        fig.savefig("./convert_results.png", dpi=200)
-        fig.show()
-        print(len(zeros), " brightness_temps are zero at pos:\n", zeros)
-
-
-    print(f"Done, {len(nan_counter)} NaNs encountered in \n{nan_counter}")   
+    
 
 
 
@@ -306,7 +317,7 @@ def convert_pt_to_2dps(path: str, prefix: str = "", debug: bool = False,
                 })
 
                 user_params = p21c.UserParams(
-                    HII_DIM=summary_statistics_parameters['HII_DIM'], 
+                    HII_DIM=summary_statistics_parameters['HII_DIM'],
                     BOX_LEN=summary_statistics_parameters['BOX_LEN'], KEEP_3D_VELOCITIES=False
                 )
 
@@ -333,7 +344,7 @@ def convert_pt_to_2dps(path: str, prefix: str = "", debug: bool = False,
 
                 res = calculate_ps(lc=img, lc_redshifts=lc.lightcone_redshifts[:img.shape[-1]], 
                     box_length=summary_statistics_parameters['BOX_LEN'], box_side_shape=summary_statistics_parameters["HII_DIM"],
-                    log_bins=False, zs=summary_statistics_parameters["z-eval"], calc_1d=False, calc_2d=True, 
+                    log_bins=False, zs=summary_statistics_parameters["z-eval"], calc_1d=False, calc_2d=True,
                     kpar_bins=summary_statistics_parameters["bins"], nbins=summary_statistics_parameters["bins"], bin_ave=True, 
                     k_weights=ignore_zero_absk, postprocess=True, get_variance=True)
 
@@ -607,6 +618,22 @@ def convert_npz_to_pt(path: str, prefix: str = "run_", check_for_nan: bool = Tru
 
     print(f"Done, {len(nan_counter)} NaNs encountered in \n{nan_counter}")   
 
+def convert_npz_to_pt_tensors(path: str, prefix: str = "", debug: bool = False) -> None:
+    """
+    Converts .npz files in the given path to .pt files by transforming each value 
+    in the dictionary to a torch.tensor with dtype=torch.float32.
+    """
+    files = fnmatch.filter(os.listdir(path), prefix + "*.npz")
+    if debug: print(f"Found files: {files}")
+    
+    with alive_bar(len(files), force_tty=True) as fbar:
+        for file in files:
+            if debug: print(f"Processing {file}")
+            data = np.load(os.path.join(path, file))
+            torch_data = {key: torch.tensor(value, dtype=torch.float32) for key, value in data.items()}
+            torch.save(torch_data, os.path.join(path, file.replace(".npz", ".pt")))
+            fbar()
+
 def chunking(lst, n):
     """Yield successive n-sized chunks from lst."""
     for i in range(0, len(lst), n):
@@ -744,3 +771,4 @@ def get_nle_posterior(
         raise NotImplementedError
 
     return posterior
+

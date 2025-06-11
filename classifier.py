@@ -61,7 +61,7 @@ class BasicBlock(nn.Module):
 
 class ResNet(nn.Module):
     def __init__(self, in_dim, n_nodes, hidden_layer, batch_norm, n_blocks, K=4, gamma=1.0, activation_fn = nn.ReLU(),
-                 device = 'cuda', prior = BoxUniform):
+                 device = 'cuda', prior = BoxUniform, epsilon: float = 1e-4):
         super(ResNet, self).__init__()
         self.in_dim = in_dim
         self.classifier = []
@@ -71,7 +71,7 @@ class ResNet(nn.Module):
                                         n_nodes,
                                       n_nodes, hidden_layer, activation_fn, batch_norm, in_dim, _)]
         self.classifier += [CLinear(n_nodes, 1, cond_dim=0, activation_fn=(lambda x: x), batch_norm=False)]
-        self.classifier = FlowSequential(*self.classifier).to(device)
+        self.classifier = nn.Sequential(*self.classifier).to(device)
         
         # shallow init for last layer
         init.uniform_(self.classifier[-1].weight, -1e-3, 1e-3)
@@ -81,12 +81,12 @@ class ResNet(nn.Module):
         self.gamma = gamma
         self.device = device
         
-        self.prior = prior(low=torch.zeros((in_dim)), high=torch.ones((in_dim)), device = device)
+        self.prior = prior(low=-torch.ones((in_dim)) + epsilon, high=torch.ones((in_dim)) - epsilon, device = device)
         
-    def forward(self, x, cond):
+    def forward(self, x, condition):
         # Initial convolution
-        out = torch.cat([x, cond], dim=-1)
-        out = self.classifier(out, cond)
+        out = torch.cat([x, condition], dim=-1)
+        out = self.classifier(out)
         return out
     
     @property
@@ -94,13 +94,13 @@ class ResNet(nn.Module):
         return D.Uniform(0,1)
     
     def loss(
-        self, theta, cond):
+        self, theta, condition):
         batch_size = theta.shape[0]
 
-        logits_marginal = self.logits(theta, cond, self.K + 1).reshape(
+        logits_marginal = self.logits(theta, condition, self.K + 1).reshape(
             batch_size, self.K + 1
         )
-        logits_joint = self.logits(theta, cond, self.K).reshape(
+        logits_joint = self.logits(theta, condition, self.K).reshape(
             batch_size, self.K
         )
 
@@ -154,7 +154,7 @@ class ResNet(nn.Module):
         self.posterior = posterior
             
 
-    def sample(self, num_samples, x, sample_kwargs = None):
+    def sample(self, num_samples, x):
         return self.posterior.sample((num_samples,), x, show_progress_bars=False)    
         
 
